@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 from voice_flow.config import USER_CONFIG_DIR
 
@@ -24,9 +23,9 @@ log = logging.getLogger(__name__)
 
 def write_env_file(
     openai_key: str,
-    anthropic_key: Optional[str] = None,
+    anthropic_key: str | None = None,
     enable_cleanup: bool = False,
-    target: Optional[Path] = None,
+    target: Path | None = None,
 ) -> Path:
     """Write the supplied keys to a .env file. Returns the path written.
 
@@ -54,7 +53,7 @@ def write_env_file(
 # ── PyQt6 dialog ───────────────────────────────────────────────────────
 
 
-def run_wizard() -> Optional[Path]:
+def run_wizard() -> Path | None:
     """Show the wizard and return the written .env path, or None on cancel.
 
     Returns None if PyQt6 is unavailable so callers can fall back to text mode.
@@ -70,7 +69,6 @@ def run_wizard() -> Optional[Path]:
             QLabel,
             QLineEdit,
             QVBoxLayout,
-            QWidget,
         )
     except ImportError as ex:
         log.warning("PyQt6 not installed (%s) — cannot show first-run wizard.", ex)

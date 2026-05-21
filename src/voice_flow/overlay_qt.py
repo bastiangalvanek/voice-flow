@@ -26,8 +26,8 @@ import random
 import sys
 import threading
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
         STATE_PROCESSING = "processing"
         STATE_SUCCESS = "success"
 
-        def __init__(self, level_provider: Optional[Callable[[], float]]):
+        def __init__(self, level_provider: Callable[[], float] | None):
             super().__init__()
             self._level_provider = level_provider
             self._state = self.STATE_HIDDEN
@@ -507,7 +507,7 @@ class RecordingOverlay:
     """
 
     def __init__(self, always_visible: bool = False, hotkey_display: str = "F8"):
-        self._level_provider: Optional[Callable[[], float]] = None
+        self._level_provider: Callable[[], float] | None = None
         self._always_visible = always_visible
         self._hotkey_display = hotkey_display
         self._widget = None
@@ -558,13 +558,19 @@ class RecordingOverlay:
 
     def _run_qt(self) -> None:
         try:
-            from PyQt6.QtCore import (Qt, QRect, QRectF, QPointF, QTimer,
-                                       pyqtSignal, pyqtSlot)
-            from PyQt6.QtGui import (QPainter, QColor, QFont, QLinearGradient,
-                                      QRadialGradient, QPen, QBrush,
-                                      QPainterPath, QPixmap)
-            from PyQt6.QtWidgets import (QApplication, QWidget,
-                                          QGraphicsDropShadowEffect)
+            from PyQt6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, pyqtSignal, pyqtSlot
+            from PyQt6.QtGui import (
+                QBrush,
+                QColor,
+                QFont,
+                QLinearGradient,
+                QPainter,
+                QPainterPath,
+                QPen,
+                QPixmap,
+                QRadialGradient,
+            )
+            from PyQt6.QtWidgets import QApplication, QGraphicsDropShadowEffect, QWidget
         except ImportError as ex:
             log.warning("PyQt6 not installed (%s) — overlay disabled", ex)
             self._ready.set()

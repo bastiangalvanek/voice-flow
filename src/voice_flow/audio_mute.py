@@ -20,7 +20,7 @@ from ctypes import POINTER, cast
 log = logging.getLogger(__name__)
 
 # Single instance for atexit hook (one process = one mute provider).
-_GLOBAL_INSTANCE: "SystemAudioMute | None" = None
+_GLOBAL_INSTANCE: SystemAudioMute | None = None
 
 
 class SystemAudioMute:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Optional
 
 from voice_flow.audio import AudioRecorder
 from voice_flow.audio_mute import SystemAudioMute
@@ -289,7 +288,7 @@ class VoiceFlowApp:
                     success_shown = True
             self._reset_state(error=False, keep_overlay=success_shown)
 
-    def _whisper_prompt(self) -> Optional[str]:
+    def _whisper_prompt(self) -> str | None:
         """First 220 chars of the first context block as Whisper prompt.
 
         OpenAI recommends short prompts. Long ones get ignored/truncated.
