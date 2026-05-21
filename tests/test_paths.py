@@ -13,7 +13,6 @@ import pytest
 
 import voice_flow.config as cfg_mod
 
-
 # ── _is_frozen ─────────────────────────────────────────────────────────
 
 

@@ -15,7 +15,7 @@ import logging
 import socket
 import sys
 import threading
-from typing import Callable, Optional
+from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +28,8 @@ class SingletonLock:
     def __init__(self, port: int = LOCK_PORT):
         self.port = port
         self._sock: socket.socket | None = None
-        self._command_handler: Optional[Callable[[str], None]] = None
-        self._accept_thread: Optional[threading.Thread] = None
+        self._command_handler: Callable[[str], None] | None = None
+        self._accept_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
     def acquire(self) -> bool:
@@ -68,7 +68,7 @@ class SingletonLock:
         while not self._stop_event.is_set():
             try:
                 conn, _addr = self._sock.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
