@@ -65,8 +65,11 @@ class VoiceFlowApp:
         self.overlay: RecordingOverlay | None = None
         if config.enable_overlay:
             try:
+                # Late import so cli.format_hotkey_display is available without circular issues.
+                from voice_flow.cli import format_hotkey_display
                 self.overlay = RecordingOverlay(
-                    always_visible=config.overlay_always_visible
+                    always_visible=config.overlay_always_visible,
+                    hotkey_display=format_hotkey_display(config.hotkey),
                 )
                 if not self.overlay.available:
                     self.overlay = None

@@ -506,9 +506,10 @@ class RecordingOverlay:
     All public methods enqueue commands via thread-safe signals.
     """
 
-    def __init__(self, always_visible: bool = False):
+    def __init__(self, always_visible: bool = False, hotkey_display: str = "F8"):
         self._level_provider: Optional[Callable[[], float]] = None
         self._always_visible = always_visible
+        self._hotkey_display = hotkey_display
         self._widget = None
         self._app = None
         self._ready = threading.Event()
@@ -583,7 +584,9 @@ class RecordingOverlay:
             self._widget = PillWidget(self._level_provider)
 
             if self._always_visible:
-                self._widget.sig_show_info.emit("Voice Flow ready · hold F8", 3500)
+                self._widget.sig_show_info.emit(
+                    f"Voice Flow ready · hold {self._hotkey_display}", 3500
+                )
 
             self._available = True
             self._ready.set()
