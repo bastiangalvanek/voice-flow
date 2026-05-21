@@ -227,6 +227,26 @@ def main(argv: list[str] | None = None) -> int:
             lock.release()
             return 2
 
+        # Restart in a fresh process so the wizard's QApplication doesn't
+        # linger and clash with the overlay's QApplication later on.
+        # The second process finds the freshly-written .env and skips the
+        # wizard. We release the singleton lock first so the new process
+        # can acquire it.
+        log.info("First-run wizard completed — restarting Voice Flow ...")
+        lock.release()
+        try:
+            import subprocess
+            subprocess.Popen([sys.executable] + sys.argv, close_fds=True)
+        except Exception as ex:
+            log.error("Failed to restart Voice Flow after wizard: %s", ex)
+            show_error(
+                "Voice Flow — restart failed",
+                f"Wizard wrote the config to:\n{wizard_result}\n\n"
+                "Please relaunch Voice Flow manually.",
+            )
+            return 3
+        return 0
+
     try:
         cfg = load_config(_build_overrides(args))
     except RuntimeError as ex:
