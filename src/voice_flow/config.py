@@ -1,14 +1,83 @@
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONTEXT_FILE = PROJECT_ROOT / "context.txt"
+log = logging.getLogger(__name__)
+
+
+def _is_frozen() -> bool:
+    """True when running inside a PyInstaller bundle."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def _project_root() -> Path:
+    """Folder that holds the running app.
+
+    - PyInstaller bundle: the folder that contains voice-flow.exe.
+    - Source checkout: the repo root (two levels above this file).
+    """
+    if _is_frozen():
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+def _user_config_dir() -> Path:
+    """Per-user config dir for the standalone EXE.
+
+    Windows: %APPDATA%\\voice-flow
+    Other:   ~/.voice-flow
+    """
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "voice-flow"
+    return Path.home() / ".voice-flow"
+
+
+PROJECT_ROOT = _project_root()
+USER_CONFIG_DIR = _user_config_dir()
+
+
+def _candidate_env_files() -> list[Path]:
+    """Ordered list of .env candidates. First existing file wins.
+
+    1. Next to the executable / in the repo root  → easiest for source users
+    2. %APPDATA%\\voice-flow\\.env                  → written by the first-run wizard
+    """
+    return [PROJECT_ROOT / ".env", USER_CONFIG_DIR / ".env"]
+
+
+def _candidate_context_files() -> list[Path]:
+    """Same lookup order as .env, but for context.txt."""
+    return [PROJECT_ROOT / "context.txt", USER_CONFIG_DIR / "context.txt"]
+
+
+def find_env_file() -> Path | None:
+    """First .env that exists, or None if no candidate is present."""
+    for p in _candidate_env_files():
+        if p.exists():
+            return p
+    return None
+
+
+def find_context_file() -> Path | None:
+    """First context.txt that exists, or None."""
+    for p in _candidate_context_files():
+        if p.exists():
+            return p
+    return None
+
+
+# Backwards-compatible constants — point at the *primary* (repo-root) location.
+# Code that needs runtime lookup uses find_env_file()/find_context_file().
 ENV_FILE = PROJECT_ROOT / ".env"
+CONTEXT_FILE = PROJECT_ROOT / "context.txt"
 
 
 @dataclass(frozen=True)
@@ -46,20 +115,47 @@ class Config:
         return self.enable_cleanup and bool(self.anthropic_api_key)
 
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off", ""}
+
+
+def _parse_bool_env(name: str, default: bool = False) -> bool:
+    """Strict bool parser: accepts only well-known truthy/falsy strings."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    val = raw.strip().lower()
+    if val in _TRUE_VALUES:
+        return True
+    if val in _FALSE_VALUES:
+        return False
+    log.warning(
+        "Env var %s=%r is not a recognized boolean — ignoring (default %s).",
+        name, raw, default,
+    )
+    return default
+
+
 def load_context() -> str:
-    if not CONTEXT_FILE.exists():
+    path = find_context_file()
+    if path is None:
         return ""
-    return CONTEXT_FILE.read_text(encoding="utf-8").strip()
+    return path.read_text(encoding="utf-8").strip()
 
 
 def load_config(overrides: dict | None = None) -> Config:
-    if ENV_FILE.exists():
-        load_dotenv(ENV_FILE)
+    env_path = find_env_file()
+    if env_path is not None:
+        load_dotenv(env_path)
 
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
+        candidates = "\n  - ".join(str(p) for p in _candidate_env_files())
         raise RuntimeError(
-            "OPENAI_API_KEY missing. Copy .env.example to .env and add your key."
+            "OPENAI_API_KEY missing.\n\n"
+            "Create a .env file with OPENAI_API_KEY=sk-... at one of:\n"
+            f"  - {candidates}\n\n"
+            "Or set the OPENAI_API_KEY environment variable."
         )
 
     device_env = os.getenv("VOICE_FLOW_AUDIO_DEVICE")
@@ -68,16 +164,11 @@ def load_config(overrides: dict | None = None) -> Config:
         try:
             audio_device = int(device_env)
         except ValueError:
-            # Loud-fail so the user notices their chosen device is being ignored.
-            import logging
-            logging.getLogger(__name__).warning(
+            log.warning(
                 "VOICE_FLOW_AUDIO_DEVICE=%r is not a number — falling back to default mic.",
                 device_env,
             )
             audio_device = None
-
-    enable_cleanup_env = os.getenv("VOICE_FLOW_ENABLE_CLEANUP")
-    enable_cleanup = bool(enable_cleanup_env and enable_cleanup_env not in ("0", "false", "False", ""))
 
     cfg = Config(
         openai_api_key=openai_key,
@@ -89,7 +180,7 @@ def load_config(overrides: dict | None = None) -> Config:
             "VOICE_FLOW_CLEANUP_MODEL", "claude-haiku-4-5-20251001"
         ),
         audio_device=audio_device,
-        enable_cleanup=enable_cleanup,
+        enable_cleanup=_parse_bool_env("VOICE_FLOW_ENABLE_CLEANUP", default=False),
         context=load_context(),
     )
 

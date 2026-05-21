@@ -41,7 +41,7 @@ Uninstall: `.\uninstall.ps1` (removes the shortcuts; `.venv` and code stay).
 |---|---|---|
 | `OPENAI_API_KEY` | **required** | OpenAI Whisper transcription |
 | `ANTHROPIC_API_KEY` | optional | If set, enables Claude cleanup |
-| `VOICE_FLOW_ENABLE_CLEANUP` | `0` | Set to `1` to actually run cleanup |
+| `VOICE_FLOW_ENABLE_CLEANUP` | `0` | `1` / `true` / `yes` / `on` to enable cleanup |
 | `VOICE_FLOW_HOTKEY` | `f8` | Push-to-talk key |
 | `VOICE_FLOW_LANGUAGE` | `auto` | Whisper language (ISO code or `auto`) |
 | `VOICE_FLOW_WHISPER_MODEL` | `gpt-4o-mini-transcribe` | Whisper model |
@@ -49,6 +49,15 @@ Uninstall: `.\uninstall.ps1` (removes the shortcuts; `.venv` and code stay).
 | `VOICE_FLOW_AUDIO_DEVICE` | system default | Mic index from `--list-devices` |
 
 CLI flags override `.env`.
+
+### `.env` lookup order
+
+Voice Flow looks for `.env` in these locations and uses the **first one** it finds:
+
+1. Next to the executable (or repo root when running from source)
+2. `%APPDATA%\voice-flow\.env` — this is where the first-run wizard writes its file
+
+The wizard (see next section) automatically puts your key in location 2, so you usually don't need to touch any file manually.
 
 ---
 
@@ -148,11 +157,14 @@ Whisper / Claude / paste are I/O — exercise them manually.
 
 ```powershell
 pip install -e ".[build]"
+python make_icon.py              # generates voice-flow.ico (one-time per logo change)
 pyinstaller voice-flow.spec
 # → dist/voice-flow.exe (single file, no Python required to run)
 ```
 
-The resulting `.exe` is ~80–120 MB (bundles Python + PyQt6 + numpy). You can ship it to non-developer users who only need to paste an API key on first run.
+The resulting `.exe` is ~80–120 MB (bundles Python + PyQt6 + numpy). On first launch it shows a **first-run wizard** that asks for the OpenAI API key (and optionally an Anthropic key) and writes it to `%APPDATA%\voice-flow\.env`. The end user never needs to touch a file.
+
+**Unsigned EXE warning:** Windows SmartScreen will show "Unknown publisher" since the EXE isn't code-signed. Users click "More info" → "Run anyway". For wider distribution, get a code-signing cert (~€80/year from Sectigo) and add `codesign_identity=` to the spec.
 
 ---
 

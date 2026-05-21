@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
 
 import keyboard
 
 from voice_flow.app import VoiceFlowApp
-from voice_flow.config import Config, load_config
+from voice_flow.config import Config, find_env_file, load_config
 from voice_flow.gui_errors import show_error
 from voice_flow.logging_setup import setup_logging
 from voice_flow.recording_storage import (
@@ -206,6 +207,25 @@ def main(argv: list[str] | None = None) -> int:
             "click the ^ in the tray area (left of the clock).",
         )
         return 1
+
+    # First-run wizard: if no .env exists and OPENAI_API_KEY isn't in the
+    # environment either, pop up a GUI dialog so the user can paste their key
+    # without touching files. Critical for the EXE-distribution flow.
+    if find_env_file() is None and not os.environ.get("OPENAI_API_KEY"):
+        log.info("No .env or OPENAI_API_KEY found — launching first-run wizard.")
+        from voice_flow.first_run import run_wizard
+
+        wizard_result = run_wizard()
+        if wizard_result is None:
+            log.info("First-run wizard cancelled or unavailable — exiting.")
+            show_error(
+                "Voice Flow — setup cancelled",
+                "Voice Flow needs an OpenAI API key to run.\n\n"
+                "Re-launch Voice Flow to try the setup again, or create a .env\n"
+                f"file manually with OPENAI_API_KEY=sk-...\n\nLog: {log_file}",
+            )
+            lock.release()
+            return 2
 
     try:
         cfg = load_config(_build_overrides(args))

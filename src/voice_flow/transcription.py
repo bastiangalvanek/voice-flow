@@ -13,7 +13,7 @@ from openai import (
     RateLimitError,
 )
 
-from voice_flow.config import ENV_FILE
+from voice_flow.config import ENV_FILE, find_env_file
 
 log = logging.getLogger(__name__)
 
@@ -75,9 +75,10 @@ class Transcriber:
 
             except AuthenticationError as ex:
                 log.error("OpenAI rejected the API key (401). No retry. %s", ex)
+                env_path = find_env_file() or ENV_FILE
                 raise TranscriberAuthError(
                     "OpenAI rejected your API key.\n\n"
-                    f"Check .env:\n{ENV_FILE}\n\n"
+                    f"Check .env:\n{env_path}\n\n"
                     "Replace OPENAI_API_KEY=sk-... with your real key,\n"
                     "then restart Voice Flow."
                 ) from ex
