@@ -1,0 +1,82 @@
+# ─── SECRETS — NIEMALS COMMITTEN ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+config.local.*
+
+# ─── BUILD ARTIFACTS ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.spec.bak
+
+# PyInstaller
+*.manifest
+pyinstaller-build/
+pyinstaller-dist/
+
+# ─── VIRTUAL ENVS ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ─── TEST / LINT CACHE ───────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ─── IDE ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── LOGS / RUNTIME DATA ─────────────────────────────────────────────
+*.log
+logs/
+.voice-flow/
+
+# ─── USER RECORDINGS / TRANSCRIPTS (defensive — speichern eh in ~/.voice-flow/) ──
+recordings/
+transcripts/
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.flac
+
+# ─── GENERATED ASSETS ────────────────────────────────────────────────
+voice-flow.ico
+*.ico
+logo.png
+logo.jpg
+logo.jpeg
+
+# ─── PERSONAL FILES (defense-in-depth — sollten eh nie hier sein) ────
+context.txt
+context.local.txt
+*personal*
+*private*
+*credentials*
+
+# ─── OS ──────────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ─── EDITOR BACKUPS ──────────────────────────────────────────────────
+*.bak
+*.orig
+*.rej

@@ -1,0 +1,15 @@
+Proper nouns: John Doe, Jane Smith, Acme Corp.
+
+Company: Acme Corp.
+
+Projects and products: Acme Dashboard, Customer Portal, Reporting API.
+
+Tools and platforms: GitHub, Slack, Jira, Notion, AWS, Stripe.
+
+Tech terms: React, TypeScript, PostgreSQL, Webhook, CI/CD, API endpoint.
+
+Spelling rules:
+- When I say "git hub" write "GitHub".
+- When I say "post gres" write "PostgreSQL".
+- When I say "type script" write "TypeScript".
+- Keep product names CamelCase even if I dictate them as separate words.
