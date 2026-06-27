@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+
+# Test / Lint cache
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Generated asset im Repo-Root (make_icon.py regeneriert es bei jedem Install).
+# Nur Root anchoren — das gebundelte Package-Asset src/voice_flow/assets/voice-flow.ico
+# MUSS getrackt werden (sorgt fuer Branding ohne Setup).
+/voice-flow.ico
+
+# OS
+Thumbs.db
+.DS_Store

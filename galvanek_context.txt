@@ -1,0 +1,22 @@
+Eigennamen: Bastian Galvanek, Dziadkowiak, Viethen, Kreitner, Ranign, Radwan, Fechter, Gaertner, Morawietz, Volker Krause, Andrea.
+
+Firma: Galvanek Bau GmbH, Handelsvertreter, HV.
+
+Projekte und Produkte: RecruitOS, SalesOS, LeadPilot, WP Flow Hub, AG-Vergleich (Angebotsvergleich), ThermoCheck, WP-Planer AI, seeker-stage-suite, calendly-two-studio, Hermes Caesar Bot.
+
+Tools und Plattformen: ClickUp, Zoho CRM, Zoho Blueprint, Supabase, n8n, Lovable, Smartlead, Retell AI, sipgate, Stripe, Google Calendar, GCal, Telegram, Railway, Hostinger VPS, GitHub, Cloudflare Tunnel, PM2, Playwright, Ollama, faster-whisper.
+
+Tech-Begriffe: Edge Function, RLS, RPC, Migration, Bucket, JWT, Webhook, Cron, pg_cron, DKIM, Inbox, Lead, Deal, Stage, Pipeline, Conversion, CR, Provision, Booking, Slot, Capacity.
+
+Fachbegriffe Heizung und Energie: Waermepumpe, WP, Photovoltaik, PV, Wartungsvertrag, BEG-EM, BAFA, KfW, R290, Propan, Vitocal, Viessmann, Daikin, Buderus, COP, JAZ, Pufferspeicher, Warmwasserspeicher, WW-Speicher, Fussbodenheizung, FBH, Heizkoerper, HK, Mischer, MIX, Verdichter, Schallschutz, Aufstellort, Zaehlerschrank, Bypass, Erdung, VDE0100-540, Hydraulik, Hydraulischer Abgleich.
+
+Begriffe Bastian-Stil: Lovable, Critic, Subagent, Skill, Memory, MCP, Wispr, Whisper, Voice Flow.
+
+Schreibweise:
+- Wenn ich "Hennes" oder "Hermes" sage und es geht um meinen Bot, schreibe "Hermes".
+- Wenn ich "klick app" sage, schreibe "ClickUp".
+- Wenn ich "soho" oder "zoho" sage, schreibe "Zoho".
+- Wenn ich "supa base" sage, schreibe "Supabase".
+- Wenn ich "lavabel" oder "loveable" sage, schreibe "Lovable".
+- Wenn ich "wisper" oder "whispr" sage, schreibe je nach Kontext "Whisper" (API) oder "Wispr" (Flow-Produkt).
+- Wenn ich "Recruit OS" oder "Sales OS" sage, schreibe "RecruitOS" / "SalesOS" (zusammen).
