@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
+import time
 
 import keyboard
 
@@ -229,12 +231,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # 27.06 Bastian: eigene AppUserModelID -> Windows gruppiert den Taskleisten-Button
     # NICHT unter pythonw.exe und zeigt das Fenster-Icon (Flocke) statt des Python-Icons.
-    # Muss VOR der ersten Fenster-Erzeugung passieren.
-    try:
-        import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Galvanek.VoiceFlow")
-    except Exception:
-        pass
+    # Muss VOR der ersten Fenster-Erzeugung passieren. Identitaet = SSoT in
+    # win_integration; derselbe Wert muss auf dem angehefteten Shortcut stehen.
+    from voice_flow.win_integration import set_process_aumid
+
+    set_process_aumid()
 
     if args.list_devices:
         return list_devices()
@@ -298,27 +299,25 @@ def main(argv: list[str] | None = None) -> int:
     quit_lock = threading.Lock()
 
     def quit_handler() -> None:
+        # NUR signalisieren — KEIN Teardown hier. Quit kann aus dem keyboard-,
+        # Qt- (Fenster-X) oder Tray-Thread kommen; Cross-Thread-Teardown (COM-
+        # Audio-Unmute, Qt, pystray aus dem falschen Thread) kann DEADLOCKEN —
+        # genau das hat den Zombie erzeugt (Log blieb bei "shutdown initiated"
+        # haengen, Port blieb belegt). Der Main-Thread raeumt mit korrekter
+        # Thread-Affinitaet auf; ein Watchdog garantiert den Prozess-Tod.
         with quit_lock:
             if holder["quit_initiated"]:
                 return
             holder["quit_initiated"] = True
         log.info("Quit angefordert.")
-        t = holder["tray"]
-        if t:
-            try:
-                t.stop()
-            except Exception:
-                pass
-        # Saubere Cleanup-Reihenfolge: shutdown() stoppt Recorder + Overlay
-        try:
-            app.shutdown()
-        except Exception as ex:
-            log.debug("app.shutdown error: %s", ex)
-        # keyboard hooks loesen, damit keyboard.wait() returnt
-        try:
-            keyboard.unhook_all()
-        except Exception as ex:
-            log.debug("keyboard.unhook_all error: %s", ex)
+
+        def _hard_exit() -> None:
+            # KEIN Logging hier: der Logging-Lock kann beim Shutdown gehalten
+            # sein -> log.* wuerde den Watchdog selbst deadlocken. Nur os._exit.
+            time.sleep(2.0)
+            os._exit(0)
+
+        threading.Thread(target=_hard_exit, daemon=True, name="quit-watchdog").start()
         quit_event.set()
 
     # Control-Fenster: X / Taskleiste-Rechtsklick-Schliessen = derselbe saubere Quit.
@@ -379,19 +378,39 @@ def main(argv: list[str] | None = None) -> int:
     app.show_ready()
 
     try:
-        # keyboard.wait() blockt bis keyboard.unhook_all() (im quit_handler) zurueckkehrt
-        # oder Ctrl+C kommt. Beim normalen Quit returnt es nach unhook_all.
-        keyboard.wait()
+        # NICHT keyboard.wait(): das macht intern `while True: sleep(1e6)` und
+        # kehrt bei keyboard.unhook_all() NICHT zurueck. Hotkeys laufen in
+        # keyboards eigenem (daemon) Listener-Thread; dieser Main-Thread parkt
+        # nur, bis quit_handler quit_event setzt.
+        quit_event.wait()
     except KeyboardInterrupt:
         log.info("KeyboardInterrupt — beende.")
+        quit_handler()  # Watchdog armen + Event setzen
     finally:
-        # quit_handler hat den Großteil schon gemacht — hier nur Idempotenz-Cleanup.
-        if not holder["quit_initiated"]:
-            quit_handler()
-        # quit_event ist gesetzt bei sauberem Shutdown; bei KeyboardInterrupt nicht zwingend
-        quit_event.wait(timeout=1.0)
-        lock.release()
+        # Teardown im MAIN-Thread (verlaessliche Thread-/COM-Affinitaet — im
+        # Callback-Thread deadlockte der COM-Unmute). Reihenfolge: Audio-Unmute
+        # zuerst (sonst bleibt System stumm), dann UI/Hooks, dann Port. Falls
+        # hier doch etwas haengt, killt der quit-watchdog den Prozess nach 2s.
+        t = holder["tray"]
+        if t:
+            try:
+                t.stop()
+            except Exception:
+                pass
+        try:
+            app.shutdown()  # Recorder stoppen, Audio unmuten, Overlay schliessen
+        except Exception as ex:
+            log.debug("app.shutdown error: %s", ex)
+        try:
+            keyboard.unhook_all()
+        except Exception as ex:
+            log.debug("keyboard.unhook_all error: %s", ex)
+        lock.release()  # Singleton-Port freigeben — sonst Zombie
         log.info("Voice Flow beendet.")
+        logging.shutdown()  # File-Handler flushen vor hartem Exit
+        # Garantierter Prozess-Tod: pystray/keyboard koennen Non-Daemon-Threads
+        # hinterlassen, die den Prozess sonst am Leben halten. Hart raus.
+        os._exit(0)
 
     return 0
 

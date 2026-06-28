@@ -18,7 +18,10 @@
 param(
     [switch]$Autostart,
     [switch]$NoShortcut,
-    [switch]$NoAutostart
+    [switch]$NoAutostart,
+    [switch]$ShortcutsOnly   # nur Icon + Shortcuts (inkl. AUMID) neu schreiben,
+                             # venv/pip/.env/Autostart ueberspringen. Fuer
+                             # "Taskleisten-Pin zeigt kein Logo"-Reparatur.
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +36,15 @@ Write-Host "===========================================================" -Foregr
 Write-Host ""
 
 # --- 1. Virtual-Env ---
+if ($ShortcutsOnly) {
+    Write-Host "[ShortcutsOnly] venv/pip/.env uebersprungen - nur Icon + Shortcuts." -ForegroundColor Cyan
+    if (-not (Test-Path ".venv")) {
+        Write-Host "FEHLER: -ShortcutsOnly braucht ein vorhandenes .venv (erst normal installieren)." -ForegroundColor Red
+        exit 1
+    }
+}
+
+if (-not $ShortcutsOnly) {
 if (-not (Test-Path ".venv")) {
     Write-Host "[1/6] Erstelle Virtual-Env (.venv) ..." -ForegroundColor Yellow
     python -m venv .venv
@@ -80,6 +92,10 @@ if (-not (Test-Path ".env")) {
 } else {
     Write-Host "[3/6] .env bereits da. OK." -ForegroundColor Green
 }
+}  # Ende: if (-not $ShortcutsOnly)
+
+# Ab hier laeuft beides (Voll-Install + ShortcutsOnly): Icon + Shortcuts.
+$pythonExe = Join-Path $projectRoot ".venv\Scripts\python.exe"
 
 # --- 4. Icon generieren ---
 # Regeneriere wenn .ico fehlt ODER logo.png neuer ist als .ico (Branding-Update)
@@ -97,7 +113,7 @@ if (-not (Test-Path "voice-flow.ico")) {
 
 if ($regen) {
     Write-Host "[4/6] Generiere voice-flow.ico ..." -ForegroundColor Yellow
-    python make_icon.py
+    & $pythonExe make_icon.py
 } else {
     Write-Host "[4/6] Icon bereits aktuell. OK." -ForegroundColor Green
 }
@@ -142,6 +158,15 @@ function New-VoiceFlowShortcut {
     $sc.Description = $Description
     $sc.WindowStyle = 7
     $sc.Save()
+    # AppUserModelID in die .lnk stempeln (WScript.Shell kann das nicht). Damit
+    # gruppiert die laufende App unter DIESEM angehefteten Shortcut statt einen
+    # kaputten pythonw-Pin zu erzeugen. SSoT der ID: voice_flow.win_integration.
+    & $pythonExe -m voice_flow.win_integration set-aumid $Path
+    # LAUT scheitern: ohne AUMID waere der Pin wieder kaputt -> NICHT still
+    # "repariert" melden ($ErrorActionPreference=Stop bricht hier ab).
+    if ($LASTEXITCODE -ne 0) {
+        throw "AppUserModelID-Stempel fehlgeschlagen fuer $Path - Pin waere wieder kaputt."
+    }
 }
 
 # Desktop
@@ -156,6 +181,20 @@ New-VoiceFlowShortcut -Path $startMenuShortcut -Description "Voice Flow - Push-t
 Write-Host "       Startmenu:        $startMenuShortcut" -ForegroundColor Green
 
 # --- 6. Autostart ---
+if ($ShortcutsOnly) {
+    Write-Host ""
+    Write-Host "===========================================================" -ForegroundColor Cyan
+    Write-Host " Shortcuts repariert (Icon + AppUserModelID gestempelt)." -ForegroundColor Green
+    Write-Host "===========================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Taskleisten-Pin neu setzen:" -ForegroundColor Yellow
+    Write-Host "   1. Falschen Pin entfernen (Rechtsklick -> Von Taskleiste loesen)."
+    Write-Host "   2. Desktop-Icon 'Voice Flow' -> Rechtsklick -> An Taskleiste anheften."
+    Write-Host "      (NICHT die laufende App anheften - das baut wieder den kaputten Pin.)"
+    Write-Host ""
+    exit 0
+}
+
 $startupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
 $startupShortcut = Join-Path $startupDir "Voice Flow.lnk"
 

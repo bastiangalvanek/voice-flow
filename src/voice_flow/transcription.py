@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import logging
+import queue
+import threading
 import time
 
 from openai import (
@@ -13,6 +15,7 @@ from openai import (
     RateLimitError,
 )
 
+from voice_flow.audio_encode import to_opus
 from voice_flow.config import ENV_FILE
 
 log = logging.getLogger(__name__)
@@ -21,6 +24,17 @@ log = logging.getLogger(__name__)
 MAX_RETRIES = 2
 RETRY_BACKOFF_SEC = 1.0
 DEFAULT_RATE_LIMIT_WAIT_SEC = 20  # OpenAI typischerweise
+
+# 28.06 Bastian "schneller, zu lang": Die OpenAI-Transcription-Latenz ist nach der
+# Opus-Kompression nicht mehr upload-bound, sondern hat eine schwere SCHWANZ-
+# Verteilung: gemessen Median ~0.7s, aber ~15% der Requests spiken auf 3-10s
+# (rein server-seitig, zufaellig, nicht reproduzierbar). Gegenmittel: Request-
+# Hedging (Dean/Barroso "Tail at Scale"). Kommt der erste Call nicht binnen
+# HEDGE_DELAY_SEC zurueck, feuert ein PARALLELER Backup; der erste Erfolg gewinnt.
+# Kein Cancel -> ein legitim langsamer (langer) Call wird nie abgewuergt, nur
+# ueberholt. Kappt den Spike (9.8s -> ~3s) zum Preis seltener Doppel-Calls.
+HEDGE_DELAY_SEC = 2.0
+HEDGE_MAX_INFLIGHT = 3  # Original + bis zu 2 Backups (deckt ~99,7% der Spikes)
 
 
 class TranscriberAuthError(RuntimeError):
@@ -62,18 +76,28 @@ class Transcriber:
         # 17.05 v2: "auto" → None (Whisper auto-detect, multilingual). Sonst ISO-Code.
         effective_language = None if language in ("auto", "", None) else language
 
+        # 28.06 Bastian "schneller": Audio EINMAL als Opus komprimieren (gemessen
+        # 2.3x schneller, ~10x kleinerer Upload, gleiche Transkription). Bei
+        # Fehler Fallback auf WAV. Vor der Retry-Schleife -> nicht pro Versuch neu.
+        opus_bytes = to_opus(wav_bytes)
+        if opus_bytes is not None:
+            upload_bytes, upload_name = opus_bytes, "audio.ogg"
+            log.debug(
+                "Upload Opus %d KB (statt WAV %d KB).",
+                len(opus_bytes) // 1024,
+                len(wav_bytes) // 1024,
+            )
+        else:
+            upload_bytes, upload_name = wav_bytes, "audio.wav"
+
         last_err: Exception | None = None
         for attempt in range(MAX_RETRIES + 1):
             try:
-                buf = io.BytesIO(wav_bytes)
-                buf.name = "audio.wav"
-                # API akzeptiert None nicht direkt fuer language → omit key
-                kwargs = {"model": self.model, "file": buf}
-                if effective_language is not None:
-                    kwargs["language"] = effective_language
-                if effective_prompt is not None:
-                    kwargs["prompt"] = effective_prompt
-                resp = self.client.audio.transcriptions.create(**kwargs)
+                # Latenz-Hedging kapselt den eigentlichen API-Call; Fehler werden
+                # unveraendert hochgereicht und unten klassifiziert/retryt.
+                resp = self._create_with_hedge(
+                    upload_bytes, upload_name, effective_language, effective_prompt
+                )
                 return (resp.text or "").strip()
 
             except AuthenticationError as ex:
@@ -145,3 +169,72 @@ class Transcriber:
         raise RuntimeError(
             f"Whisper API failed after {MAX_RETRIES + 1} attempts"
         ) from last_err
+
+    def _create_with_hedge(
+        self,
+        upload_bytes: bytes,
+        upload_name: str,
+        language: str | None,
+        prompt: str | None,
+    ):
+        """Ein Transcription-Call mit Latenz-Hedging (siehe HEDGE_DELAY_SEC).
+
+        Feuert den Call; kommt binnen HEDGE_DELAY_SEC kein Ergebnis, startet ein
+        PARALLELER Backup (bis HEDGE_MAX_INFLIGHT). Der erste Erfolg gewinnt und
+        wird zurueckgegeben; verlierende Calls laufen als Daemon-Threads aus und
+        werden ignoriert (kein Cancel — ein langer, legitimer Call wird nie
+        abgewuergt). Schlagen ALLE gestarteten Versuche fehl, wird der erste
+        Fehler hochgereicht -> die aeussere Schleife klassifiziert/retryt ihn.
+        """
+        results: queue.Queue = queue.Queue()
+
+        def attempt() -> None:
+            # Jeder Versuch braucht einen FRISCHEN BytesIO (Cursor/Verbrauch).
+            buf = io.BytesIO(upload_bytes)
+            buf.name = upload_name
+            kwargs = {"model": self.model, "file": buf}
+            if language is not None:
+                kwargs["language"] = language
+            if prompt is not None:
+                kwargs["prompt"] = prompt
+            try:
+                results.put((True, self.client.audio.transcriptions.create(**kwargs)))
+            except Exception as ex:  # noqa: BLE001 - klassifiziert die aeussere Schleife
+                results.put((False, ex))
+
+        def launch() -> None:
+            threading.Thread(target=attempt, daemon=True, name="whisper-hedge").start()
+
+        launch()
+        started = 1
+        errored = 0
+        first_error: Exception | None = None
+        deadline = time.monotonic() + HEDGE_DELAY_SEC
+
+        while True:
+            can_hedge = started < HEDGE_MAX_INFLIGHT
+            wait = max(0.0, deadline - time.monotonic()) if can_hedge else None
+            try:
+                ok, payload = results.get(timeout=wait)
+            except queue.Empty:
+                # Erster Call zu langsam -> parallelen Backup feuern (kein Cancel).
+                launch()
+                started += 1
+                deadline = time.monotonic() + HEDGE_DELAY_SEC
+                continue
+
+            if ok:
+                return payload  # schnellster Erfolg gewinnt
+
+            # Ein Versuch ist fehlgeschlagen. KEIN paralleler Nachschuss bei
+            # Fehler — das wuerde bei 429/5xx den Server HAMMERN statt zu
+            # backoffen (Critic P1-3). Gehedgt wird AUSSCHLIESSLICH auf Latenz
+            # (Empty-Timeout oben). Sobald kein Versuch mehr laeuft, geht der
+            # erste Fehler hoch; die aeussere Schleife klassifiziert/retryt ihn
+            # mit korrektem Backoff/retry-after (auth=fatal, 429=warten).
+            errored += 1
+            first_error = first_error or payload
+            if errored >= started:
+                raise first_error
+            # Sonst: noch ein (Latenz-)Hedge in-flight -> auf ihn warten, er kann
+            # noch erfolgreich sein (Fehler eines Hedges verwirft das Original nicht).

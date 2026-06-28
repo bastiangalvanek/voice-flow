@@ -641,7 +641,18 @@ class RecordingOverlay:
         if self._widget:
             self._widget.sig_close_request.emit()
         if self._app is not None:
-            self._app.quit()
+            # app.quit() MUSS im Qt-Thread laufen. Direkt aus einem Fremd-Thread
+            # (Main-Thread beim Shutdown) BLOCKIERT es -> der Prozess haengt hier
+            # und wird zum Zombie (Singleton-Port bleibt belegt). Queued in den
+            # Qt-Thread posten = non-blocking.
+            try:
+                from PyQt6.QtCore import QMetaObject, Qt
+
+                QMetaObject.invokeMethod(
+                    self._app, "quit", Qt.ConnectionType.QueuedConnection
+                )
+            except Exception as ex:
+                log.debug("app.quit invoke error: %s", ex)
 
     def _run_qt(self) -> None:
         try:
