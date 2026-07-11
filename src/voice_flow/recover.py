@@ -19,15 +19,39 @@ import time
 from pathlib import Path
 
 from voice_flow.audio_chunks import wav_duration_seconds
-from voice_flow.config import load_config
+from voice_flow.config import Config, load_config
 from voice_flow.recording_storage import RECORDINGS_DIR, list_pending_recordings
+from voice_flow.session_link import derive_captures, find_session_for
 from voice_flow.transcript_history import append_transcript
 from voice_flow.transcript_quality import is_suspect_transcription
+from voice_flow.transcript_weave import weave_screenshot_markers
 from voice_flow.transcription import Transcriber
 
 log = logging.getLogger(__name__)
 
 RECOVERABLE_SUFFIXES = ("_failed", "_suspect")
+# Marker den eine Claude-Session direkt als "sieh dir dieses Bild an" liest —
+# absoluter Pfad, damit Read/Anhang funktioniert.
+_SHOT_MARKER = "\n\n[📷 Screenshot {n} — bitte ansehen: {path}]\n"
+
+
+def _weave_session_screenshots(
+    text: str, recording_path: Path, duration: float, cfg: Config
+) -> str:
+    """Screenshots des zugehörigen Session-Buckets zeitproportional einweben.
+
+    Kein passender Bucket / keine Shots → Text unverändert. So bekommt auch ein
+    nachträglich recovertes Diktat die Bilder an der richtigen Stelle (Bastian
+    11.07: "die Bilder fehlen im Transkript").
+    """
+    session_dir = find_session_for(recording_path, duration, cfg.sessions_dir)
+    if session_dir is None:
+        return text
+    captures = derive_captures(session_dir, _SHOT_MARKER)
+    if not captures:
+        return text
+    log.info("RECOVER  %d Screenshots aus %s eingewoben.", len(captures), session_dir.name)
+    return weave_screenshot_markers(text, captures, duration)
 
 
 def find_recoverable() -> list[Path]:
@@ -55,35 +79,41 @@ def mark_recovered(path: Path) -> Path:
         return path
 
 
-def recover_file(path: Path, transcriber: Transcriber, language: str) -> str:
-    """Eine WAV transkribieren, persistieren, markieren. Returns Transkript."""
+def recover_file(path: Path, transcriber: Transcriber, cfg: Config) -> str:
+    """Eine WAV transkribieren, Screenshots einweben, persistieren, markieren.
+
+    Returns das (mit Bild-Markern angereicherte) Transkript.
+    """
     wav_bytes = path.read_bytes()
     duration = wav_duration_seconds(wav_bytes)
     log.info("RECOVER  %s (%.1f min) …", path.name, duration / 60.0)
     t0 = time.time()
-    text = transcriber.transcribe(wav_bytes, language=language)
+    raw = transcriber.transcribe(wav_bytes, language=cfg.language)
     elapsed = time.time() - t0
-    if not text:
+    if not raw:
         log.warning("RECOVER  %s: leeres Transkript — Datei bleibt unverändert.", path.name)
         return ""
 
-    word_count = len(text.split())
-    suspect, reason = is_suspect_transcription(text, duration)
+    # Suspect-Erkennung auf dem ROHtext (Bild-Marker würden Wort/Sek verzerren).
+    word_count = len(raw.split())
+    suspect, reason = is_suspect_transcription(raw, duration)
+    woven = _weave_session_screenshots(raw, path, duration, cfg)
+
     if suspect:
-        # Wahrscheinlich halluziniert: .txt zum Begutachten, aber KEIN
-        # History-Eintrag (sonst haeuft jeder erneute Lauf Duplikate an,
+        # Wahrscheinlich halluziniert: .txt (mit Bildern) zum Begutachten, aber
+        # KEIN History-Eintrag (sonst haeuft jeder erneute Lauf Duplikate an,
         # Critic P2) und die Datei bleibt unmarkiert fuer den Retry.
-        path.with_suffix(".txt").write_text(text, encoding="utf-8")
+        path.with_suffix(".txt").write_text(woven, encoding="utf-8")
         log.warning("RECOVER  Transkript verdächtig (%s) — Datei bleibt für Retry.", reason)
-        return text
+        return woven
 
     # Erst renamen, dann .txt schreiben — so heissen WAV und TXT gleich
     # (recording_x_recovered.wav + recording_x_recovered.txt).
     path = mark_recovered(path)
     txt_path = path.with_suffix(".txt")
-    txt_path.write_text(text, encoding="utf-8")
+    txt_path.write_text(woven, encoding="utf-8")
     append_transcript(
-        text=text,
+        text=woven,
         duration_sec=duration,
         word_count=word_count,
         model=transcriber.model,
@@ -95,7 +125,7 @@ def recover_file(path: Path, transcriber: Transcriber, language: str) -> str:
         elapsed,
         txt_path.name,
     )
-    return text
+    return woven
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -119,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = 0
     for path in targets:
         try:
-            text = recover_file(path, transcriber, config.language)
+            text = recover_file(path, transcriber, config)
         except Exception as ex:  # noqa: BLE001 - eine kaputte Datei killt nicht den Rest
             log.error("RECOVER  %s fehlgeschlagen: %s", path.name, ex)
             failures += 1
