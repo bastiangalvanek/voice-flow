@@ -28,17 +28,21 @@ class Config:
     # 27.06 Bastian: Session-Buckets unter ~/voice-flow/sessions/<timestamp>/.
     sessions_dir: Path = field(default_factory=lambda: Path.home() / "voice-flow" / "sessions")
     quit_hotkey: str = "ctrl+shift+alt+q"
-    # 17.05 v2 Bastian: auto-detect, weil er auch englische Woerter mischt
-    # ("Transcripting" etc.). "auto" wird in transcription.py zu None konvertiert
-    # → Whisper detected die Sprache pro-Aufnahme.
-    language: str = "auto"
+    # 07.07 Bastian "falsche Sprache, mega weird — auch bei ChatGPT im Web":
+    # Grundursache ist das System-Mikro (Bluetooth-Headset im 8-kHz-Hands-Free-
+    # Modus → matschiges Audio). Auf so verwaschenem Audio hat "auto" Whisper die
+    # Sprache falsch raten lassen (Englisch/Spanisch-Halluzination). Default jetzt
+    # "de" — eingestreute englische Woerter transkribiert Whisper trotzdem, aber
+    # die Erkennung faellt nicht mehr auf eine Fremdsprache um.
+    # Zurueck auf Auto-Detect: VOICE_FLOW_LANGUAGE=auto in .env.
+    language: str = "de"
     # gpt-4o-mini-transcribe ist ~4x schneller als whisper-1 bei vergleichbarer
     # Qualitaet fuer Sprache. Default nach Bastians "schneller"-Wunsch (16.05).
     whisper_model: str = "gpt-4o-mini-transcribe"
     cleanup_model: str = "claude-haiku-4-5-20251001"
     sample_rate: int = 16000
     channels: int = 1
-    audio_device: int | None = None
+    audio_device: int | str | None = None
     min_recording_sec: float = 0.3
     enable_tray: bool = True
     enable_overlay: bool = True
@@ -77,18 +81,14 @@ def load_config(overrides: dict | None = None) -> Config:
         )
 
     device_env = os.getenv("VOICE_FLOW_AUDIO_DEVICE")
-    audio_device: int | None = None
+    audio_device: int | str | None = None
     if device_env:
+        # Zahl = fester Geraete-Index. Sonst = Name-Teil ("Poly") — robust gegen
+        # wechselnde Indizes, matcht dein Mikro am Namen.
         try:
             audio_device = int(device_env)
         except ValueError:
-            # Critic P2-22: Bastian merkt sonst nicht warum sein gewaehltes Geraet ignoriert wird
-            import logging
-            logging.getLogger(__name__).warning(
-                "VOICE_FLOW_AUDIO_DEVICE=%r ist keine Zahl — Default-Mikro wird genutzt.",
-                device_env,
-            )
-            audio_device = None
+            audio_device = device_env.strip()
 
     cfg = Config(
         openai_api_key=openai_key,
@@ -97,7 +97,7 @@ def load_config(overrides: dict | None = None) -> Config:
         hotkey_mode=os.getenv("VOICE_FLOW_HOTKEY_MODE", "toggle"),
         screenshot_hotkey=os.getenv("VOICE_FLOW_SCREENSHOT_HOTKEY", "f7"),
         annotate_hotkey=os.getenv("VOICE_FLOW_ANNOTATE_HOTKEY", "f6"),
-        language=os.getenv("VOICE_FLOW_LANGUAGE", "auto"),
+        language=os.getenv("VOICE_FLOW_LANGUAGE", "de"),
         whisper_model=os.getenv("VOICE_FLOW_WHISPER_MODEL", "gpt-4o-mini-transcribe"),
         cleanup_model=os.getenv(
             "VOICE_FLOW_CLEANUP_MODEL", "claude-haiku-4-5-20251001"

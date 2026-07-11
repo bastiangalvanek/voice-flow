@@ -556,6 +556,7 @@ class RecordingOverlay:
         self._widget = None
         self._toasts = None  # ToastManager (premium event-notifications)
         self._control = None  # ControlWindow (sichtbar in Taskleiste)
+        self._device_controls = None  # (devices, selected, on_select), falls vor _control gesetzt
         self._annotate_bridge = None  # erzeugt das F6-Zeichen-Overlay auf dem Qt-Thread
         self._on_quit_cb: Optional[Callable[[], None]] = None
         self._app = None
@@ -626,6 +627,12 @@ class RecordingOverlay:
         """Fenster sichtbar machen — vom CLI NACH set_quit_handler gerufen (kein Race)."""
         if self._control is not None:
             self._control.sig_show.emit()
+
+    def set_device_controls(self, devices, selected_name, on_select) -> None:
+        """Mikrofon-Dropdown im Control-Fenster befuellen (thread-safe)."""
+        self._device_controls = (devices, selected_name, on_select)
+        if self._control is not None:
+            self._control.set_devices(devices, selected_name, on_select)
 
     def open_annotate(self, monitor: dict, on_shoot: Callable) -> None:
         """F6: Zeichen-Overlay oeffnen. THREAD-SAFE aus dem Hook-Thread.
@@ -704,6 +711,9 @@ class RecordingOverlay:
                 from voice_flow.control_window import build_control_window_class
                 ControlWindow = build_control_window_class()
                 self._control = ControlWindow(on_quit=self._fire_quit)
+                # Falls die Mikrofon-Liste schon vor dem Fenster gesetzt wurde.
+                if self._device_controls is not None:
+                    self._control.set_devices(*self._device_controls)
             except Exception as ex:
                 log.warning("Control-Fenster-Init fehlgeschlagen: %s", ex)
                 self._control = None

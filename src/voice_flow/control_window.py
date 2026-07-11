@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+from voice_flow.audio import clean_device_name
 from voice_flow.logo_loader import resolve_icon_path, resolve_logo_path
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,17 @@ _QSS = """
     border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600;
 }
 #legendVal { color: #9B9BA3; font-size: 12px; }
+#micLabel { color: #9B9BA3; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
+#micCombo {
+    background: #1A1A20; color: #E6E6EA; border: 1px solid #2A2A33;
+    border-radius: 8px; padding: 7px 10px; font-size: 12px;
+}
+#micCombo:hover { border-color: #3A3A45; }
+#micCombo::drop-down { border: none; width: 22px; }
+#micCombo QAbstractItemView {
+    background: #16161B; color: #E6E6EA; border: 1px solid #2A2A33;
+    selection-background-color: #2A2A33; outline: none;
+}
 #hint { color: #5C5C66; font-size: 11px; }
 #quit {
     background: #1B1216; color: #FF6B61; border: 1px solid #3A2429;
@@ -51,22 +63,23 @@ _QSS = """
 def build_control_window_class():
     from PyQt6.QtCore import Qt, pyqtSignal
     from PyQt6.QtGui import QIcon, QPixmap
-    from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
-                                 QVBoxLayout, QWidget)
+    from PyQt6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
     class ControlWindow(QWidget):
-        # thread-safe: set_status()/show kann aus anderen Threads kommen
+        # thread-safe: set_status()/show/Device-Liste kann aus anderen Threads kommen
         sig_status = pyqtSignal(str)
         sig_show = pyqtSignal()
+        sig_devices = pyqtSignal(object)  # payload: (devices, selected_name, on_select)
 
         def __init__(self, on_quit, hotkey_label: str = "F8"):
             super().__init__()
             self._on_quit = on_quit
+            self._on_device_select = None  # callback(name) — gesetzt via set_devices
             self.setObjectName("root")
             self.setWindowTitle("Voice Flow")
-            # 27.06: dritte Hotkey-Zeile (F6) -> +28px Hoehe, sonst Quetschung.
-            self.setMinimumSize(390, 310)
-            self.resize(390, 310)
+            # 27.06: dritte Hotkey-Zeile (F6) -> +28px. + Mikrofon-Picker -> +62px.
+            self.setMinimumSize(390, 372)
+            self.resize(390, 372)
 
             logo = resolve_logo_path()
             # Taskleisten-Button: scharfe .ico bevorzugen, sonst logo.png.
@@ -115,6 +128,21 @@ def build_control_window_class():
                 legend.addLayout(self._legend_row(QLabel, QHBoxLayout, key, desc))
             root.addLayout(legend)
 
+            # Mikrofon-Auswahl (dynamisch befuellt via set_devices, thread-safe).
+            mic_col = QVBoxLayout()
+            mic_col.setSpacing(6)
+            mic_lbl = QLabel("MIKROFON")
+            mic_lbl.setObjectName("micLabel")
+            self._mic_combo = QComboBox()
+            self._mic_combo.setObjectName("micCombo")
+            self._mic_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._mic_combo.setEnabled(False)
+            self._mic_combo.addItem("Wird geladen …")
+            self._mic_combo.currentIndexChanged.connect(self._on_mic_changed)
+            mic_col.addWidget(mic_lbl)
+            mic_col.addWidget(self._mic_combo)
+            root.addLayout(mic_col)
+
             root.addStretch(1)
 
             # Beenden-Button
@@ -131,6 +159,7 @@ def build_control_window_class():
 
             self.sig_status.connect(self._apply_status)
             self.sig_show.connect(self._do_show)
+            self.sig_devices.connect(self._apply_devices)
             self._apply_status("idle")
 
         def _do_show(self) -> None:
@@ -161,6 +190,38 @@ def build_control_window_class():
         # thread-safe Status-Update (aus app-Threads via Signal)
         def set_status(self, state: str) -> None:
             self.sig_status.emit(state)
+
+        # thread-safe Mikrofon-Liste setzen (aus app-Thread via Signal).
+        def set_devices(self, devices, selected_name, on_select) -> None:
+            self.sig_devices.emit((list(devices), selected_name, on_select))
+
+        def _apply_devices(self, payload) -> None:
+            devices, selected_name, on_select = payload
+            combo = self._mic_combo
+            # Waehrend Neubefuellung KEIN Save ausloesen (currentIndexChanged feuert).
+            self._on_device_select = None
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("Windows-Standard", None)  # None = Auto/Default
+            select_row = 0
+            for _idx, raw_name in devices:
+                # Anzeige = sauberer Name, gespeichert/gematcht wird der Roh-Name.
+                combo.addItem(clean_device_name(raw_name), raw_name)
+                if selected_name and raw_name == selected_name:
+                    select_row = combo.count() - 1
+            combo.setCurrentIndex(select_row)
+            combo.setEnabled(True)
+            combo.blockSignals(False)
+            self._on_device_select = on_select
+
+        def _on_mic_changed(self, _index: int) -> None:
+            if self._on_device_select is None:
+                return
+            name = self._mic_combo.currentData()  # Geraete-Name oder None
+            try:
+                self._on_device_select(name)
+            except Exception as ex:
+                log.warning("Mikrofon-Auswahl-Handler-Fehler: %s", ex)
 
         def _apply_status(self, state: str) -> None:
             label, color = status_display(state)

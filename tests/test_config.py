@@ -26,8 +26,9 @@ def test_load_config_with_key(monkeypatch, tmp_path):
     assert cfg.anthropic_api_key is None
     assert cfg.cleanup_available is False
     assert cfg.hotkey == "f8"
-    # 17.05 v2 Bastian-Decision: Default-Sprache "auto" (Whisper detected pro Aufnahme).
-    assert cfg.language == "auto"
+    # 07.07 Bastian-Decision: Default-Sprache "de" (auto liess Whisper auf
+    # verwaschenem Mikro-Audio die Sprache falsch raten -> EN/ES-Halluzination).
+    assert cfg.language == "de"
 
 
 def test_overrides_apply(monkeypatch, tmp_path):
