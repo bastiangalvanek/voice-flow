@@ -275,13 +275,13 @@ def main(argv: list[str] | None = None) -> int:
 
     _print_banner(cfg, log_file)
 
-    # Recording-Cleanup: alte (>7d) loeschen, pending listen
+    # Recording-Retention (Alter + Groessen-Deckel), dann pending listen
     try:
         cleanup_old_recordings()
         pending = list_pending_recordings()
         if pending:
             log.warning(
-                "%d Recording(s) liegen in %s — vorherige Pipeline-Fehler?",
+                "%d Recording(s) liegen in %s — Retry: python -m voice_flow.recover",
                 len(pending), RECORDINGS_DIR,
             )
     except Exception as ex:

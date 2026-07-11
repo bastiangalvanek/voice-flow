@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Optional
 
-from voice_flow.audio import AudioRecorder
+from voice_flow.audio import AudioRecorder, list_input_devices
 from voice_flow.audio_mute import SystemAudioMute
 from voice_flow.cleanup import Cleaner
 from voice_flow.config import Config
@@ -13,13 +12,15 @@ from voice_flow.gui_errors import show_error
 from voice_flow.overlay import RecordingOverlay
 from voice_flow.paste import paste_to_active_window
 from voice_flow.recording_storage import (
-    check_size_for_whisper,
-    delete_recording,
+    archive_recording,
     mark_failed,
+    mark_suspect,
     save_recording,
 )
+from voice_flow.settings import Settings
 from voice_flow.sound import beep_error, beep_ready, beep_start, beep_stop
 from voice_flow.transcript_history import append_transcript
+from voice_flow.transcript_quality import is_suspect_transcription
 from voice_flow.transcript_weave import weave_screenshot_markers
 from voice_flow.transcription import Transcriber, TranscriberAuthError
 
@@ -39,10 +40,14 @@ class VoiceFlowApp:
 
     def __init__(self, config: Config):
         self.config = config
+        # Persistente Mikrofon-Wahl. UI-Dropdown schreibt hier rein, Recorder liest
+        # bei JEDEM Start (Callable) → Auswahl wirkt live. Fallback-Kette in
+        # resolve_input_device: UI-Wahl → .env-Override → Windows-Standard → erstes Mikro.
+        self.settings = Settings()
         self.recorder = AudioRecorder(
             sample_rate=config.sample_rate,
             channels=config.channels,
-            device=config.audio_device,
+            device=self._current_device,
         )
         self.transcriber = Transcriber(
             api_key=config.openai_api_key,
@@ -83,6 +88,7 @@ class VoiceFlowApp:
                     log.warning("Overlay nicht verfuegbar, laufe ohne floating UI.")
                 else:
                     self.overlay.set_level_provider(lambda: self.recorder.current_level)
+                    self._populate_mic_picker()
             except Exception as ex:
                 log.warning("Overlay-Init fehlgeschlagen: %s", ex)
                 self.overlay = None
@@ -100,6 +106,27 @@ class VoiceFlowApp:
             except Exception as ex:
                 log.warning("Audio-Mute-Init fehlgeschlagen: %s", ex)
                 self.audio_mute = None
+
+    # ---------- Mikrofon-Auswahl ----------
+
+    def _current_device(self) -> int | str | None:
+        """Aktuell gewaehltes Mikro: UI-Wahl gewinnt, sonst .env-Override, sonst None."""
+        return self.settings.audio_device or self.config.audio_device
+
+    def _populate_mic_picker(self) -> None:
+        """Fuellt das Dropdown im Control-Fenster mit allen vorhandenen Mikros."""
+        try:
+            devices = list_input_devices()
+            self.overlay.set_device_controls(
+                devices, self.settings.audio_device, self._on_mic_selected
+            )
+        except Exception as ex:
+            log.warning("Mikrofon-Liste nicht ermittelbar: %s", ex)
+
+    def _on_mic_selected(self, name: str | None) -> None:
+        """Callback aus dem Dropdown — Wahl persistieren (wirkt beim naechsten F8)."""
+        self.settings.set_audio_device(name)
+        log.info("Mikrofon gewaehlt: %s", name or "Windows-Standard")
 
     # ---------- Hotkey-Callbacks ----------
 
@@ -138,12 +165,21 @@ class VoiceFlowApp:
             # Critic P0-5: Audio MUSS unmuted werden sonst bleibt System stumm
             if self.audio_mute:
                 self.audio_mute.unmute()
+            if self.config.enable_sound:
+                beep_error()
             with self._state_lock:
                 self.state = self.STATE_IDLE
                 self._hotkey_down = False
                 self._tray_set("error")
                 if self.overlay:
                     self.overlay.hide()
+                    # Klare Ursache statt stummem "Fehler": fast immer kein/deaktiviertes
+                    # Mikro. Im Control-Fenster kann man oben ein anderes waehlen.
+                    self.overlay.show_info(
+                        "Mikrofon konnte nicht geoeffnet werden — anderes Mikro "
+                        "im Voice-Flow-Fenster waehlen oder in Windows aktivieren.",
+                        6000,
+                    )
 
     def on_hotkey_release(self) -> None:
         with self._state_lock:
@@ -306,23 +342,12 @@ class VoiceFlowApp:
                 )
                 return
 
-            # Backup auf Disk BEVOR Whisper-Call — bei Fehler bleibt das Audio
+            # Backup auf Disk BEVOR Whisper-Call — bei Fehler bleibt das Audio.
+            # 11.07 Bastian: KEIN Size-Check mehr. Der alte Check mass die rohen
+            # WAV-Bytes (14.5-Min-Diktat = 27 MB → abgebrochen), obwohl der
+            # Upload als Opus nur ~2 MB gewesen waere. Lang-Audio chunkt jetzt
+            # der Transcriber selbst (audio_chunks) — "zu lang" gibt es nicht mehr.
             backup_path = save_recording(wav)
-
-            # Size-Check fuer Whisper-25-MB-Limit
-            ok, msg = check_size_for_whisper(wav)
-            if msg:
-                log.warning("AUDIO  %s", msg)
-            if not ok:
-                # Datei bleibt gesichert, aber wir versuchen den Call gar nicht erst
-                mark_failed(backup_path)
-                backup_path = None  # nicht nochmal anfassen im finally
-                if self.overlay:
-                    self.overlay.show_info(
-                        f"Aufnahme zu lang ({len(wav) // 1024 // 1024} MB) · gesichert",
-                        duration_ms=2800,
-                    )
-                return
 
             log.info("PROC   %.1fs Audio → Whisper …", duration)
             t0 = time.time()
@@ -405,12 +430,29 @@ class VoiceFlowApp:
                     if self.session is sess:
                         self.session = None
 
-            # Erfolg → Backup loeschen, brauchen wir nicht mehr
-            delete_recording(backup_path)
-            backup_path = None
+            # 07.07 Bastian: Whisper wertet auch eine Halluzination als "Erfolg"
+            # (Text != leer). Frueher wurde das Audio danach geloescht -> eine
+            # kaputte Aufnahme (verzerrtes Bluetooth-Mikro) war unwiederbringlich
+            # weg. Jetzt: verdaechtige Transkription -> Audio BEHALTEN fuer Retry.
+            suspect, suspect_reason = is_suspect_transcription(cleaned, duration)
+            if suspect:
+                log.warning("VERDACHT  %s — Audio behalten statt loeschen.", suspect_reason)
+                mark_suspect(backup_path)
+                backup_path = None
+                if self.overlay:
+                    self.overlay.show_info(
+                        f"⚠ Transkription verdaechtig · Audio behalten ({suspect_reason})",
+                        duration_ms=6000,
+                    )
+                    success_shown = True
+            else:
+                # Erfolg → WAV als winziges Opus-Archiv behalten (11.07 Bastian:
+                # "immer storen") statt Hard-Delete. Retention raeumt zeitgesteuert.
+                archive_recording(backup_path)
+                backup_path = None
 
             # Apple-style success-Flash an der Pille (kurz, bottom-center).
-            if self.overlay:
+            if self.overlay and not suspect:
                 word_label = f"{word_count} Wort" if word_count == 1 else f"{word_count} Woerter"
                 self.overlay.show_success(
                     f"{word_label} · {total_s:.1f}s",
@@ -457,7 +499,7 @@ class VoiceFlowApp:
                     success_shown = True  # damit reset_state das overlay nicht killt
             self._reset_state(error=False, keep_overlay=success_shown)
 
-    def _whisper_prompt(self) -> Optional[str]:
+    def _whisper_prompt(self) -> str | None:
         """Erste 220 Zeichen des ersten Context-Blocks als Whisper-Prompt.
 
         OpenAI empfiehlt kurze Prompts. Lange Prompts werden ignoriert/getrunkiert.

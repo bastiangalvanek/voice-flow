@@ -15,6 +15,7 @@ from openai import (
     RateLimitError,
 )
 
+from voice_flow.audio_chunks import split_wav_for_transcription
 from voice_flow.audio_encode import to_opus
 from voice_flow.config import ENV_FILE
 
@@ -71,6 +72,36 @@ class Transcriber:
         if not wav_bytes:
             raise ValueError("Empty audio bytes — kann nichts transkribieren.")
 
+        # 11.07 Bastian (14.5-Min-Diktat scheiterte am 25-MB-Pre-Check): Lang-
+        # Audio wird an Stille-Grenzen in ~5-Min-Chunks geschnitten und einzeln
+        # transkribiert — "Aufnahme zu lang" existiert damit nicht mehr. Kurze
+        # Aufnahmen kommen als [wav_bytes] zurück = exakt der alte Pfad.
+        chunks = split_wav_for_transcription(wav_bytes)
+        if len(chunks) == 1:
+            return self._transcribe_single(wav_bytes, language, prompt)
+
+        parts: list[str] = []
+        for i, chunk in enumerate(chunks, start=1):
+            log.info("CHUNK  %d/%d → Whisper …", i, len(chunks))
+            text = self._transcribe_single(chunk, language, prompt)
+            if text:
+                parts.append(text)
+        if parts and len(parts) < len(chunks):
+            # Nicht still verschlucken: ein leerer Chunk mitten in der Serie
+            # waere im gejointen Ergebnis unsichtbar (Critic P2).
+            log.warning(
+                "CHUNK  nur %d/%d Chunks lieferten Text — moegliche Luecke im Transkript.",
+                len(parts),
+                len(chunks),
+            )
+        return " ".join(parts)
+
+    def _transcribe_single(
+        self,
+        wav_bytes: bytes,
+        language: str = "auto",
+        prompt: str | None = None,
+    ) -> str:
         # Bei gpt-4o-Modellen: prompt nicht senden (siehe Critic P1-11)
         effective_prompt = prompt if self._supports_prompt_as_vocab_hint() else None
         # 17.05 v2: "auto" → None (Whisper auto-detect, multilingual). Sonst ISO-Code.
