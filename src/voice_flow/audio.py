@@ -4,13 +4,24 @@ import io
 import logging
 import re
 import threading
+import time
 import wave
 from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
 
+from voice_flow.spool import FLUSH_INTERVAL_SEC, WavSpool
+
 log = logging.getLogger(__name__)
+
+# Zeitgrenze fuer PortAudios stop()/close(). Ein Default-Input-Wechsel waehrend
+# der Aufnahme (Bluetooth-Headset trennt) kann CoreAudio in einen Mutex-Zyklus
+# schicken, aus dem es NIE zurueckkehrt (Vorfall 16.08.2026). Danach wird die
+# Aufnahme trotzdem ausgeliefert, statt den Prozess einzufrieren.
+STOP_TIMEOUT_SEC = 5.0
 
 def clean_device_name(raw: str) -> str:
     """Menschenlesbarer Mikro-Name fuer das Dropdown.
@@ -123,9 +134,14 @@ class AudioRecorder:
         sample_rate: int = 16000,
         channels: int = 1,
         device: int | str | None | Callable[[], int | str | None] = None,
+        spool_dir: Path | None = None,
     ):
         self.sample_rate = sample_rate
         self.channels = channels
+        # Verzeichnis fuer die Live-Mitschrift. None = kein Spool (Tests/Bibliotheks-
+        # nutzung). Die App uebergibt hier IMMER RECORDINGS_DIR — dafuer gibt es
+        # einen Test, damit der Schutz nicht still verloren geht.
+        self.spool_dir = Path(spool_dir) if spool_dir else None
         # device kann statisch (Index/Name) ODER ein Callable sein. Callable wird
         # bei JEDEM start() ausgewertet → die UI-Mikrofon-Auswahl wirkt live,
         # ohne Neustart.
@@ -133,6 +149,14 @@ class AudioRecorder:
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
+        # Live-Spool (16.08.2026): schreibt die laufende Aufnahme mit, damit ein
+        # CoreAudio-Deadlock/Absturz das Audio nicht mehr im RAM gefangen haelt.
+        self._spool: WavSpool | None = None
+        self._spool_stop: threading.Event | None = None
+        self._spool_thread: threading.Thread | None = None
+        # True, wenn der letzte stop() in PortAudio/CoreAudio haengen blieb. Dann
+        # ist das Audio-System dieses Prozesses unbrauchbar -> App muss neu starten.
+        self.audio_system_stuck = False
         # Live RMS-Level (0.0 .. 1.0), aktualisiert im Audio-Callback.
         # Lesbar von anderem Thread (Overlay) — float-Zuweisung ist atomic in CPython.
         self._current_level: float = 0.0
@@ -143,6 +167,14 @@ class AudioRecorder:
         with self._lock:
             if self._stream is not None:
                 raise RuntimeError("AudioRecorder.start() called while already recording.")
+            if self.audio_system_stuck:
+                # Nach einem CoreAudio-Deadlock wuerde auch das OEFFNEN eines neuen
+                # Streams im selben Mutex haengen — und diesmal ohne Aufnahme, die
+                # es zu retten gaebe. Sofort und laut scheitern statt einfrieren.
+                raise RuntimeError(
+                    "Das Audio-System von macOS haengt seit dem letzten Stopp "
+                    "(Mikrofon-Wechsel waehrend der Aufnahme). Voice Flow neu starten."
+                )
             self._frames = []
             self._current_level = 0.0
             # Geraet bei JEDEM Start neu aufloesen — so wirkt UI-Auswahl/Umstecken/
@@ -157,6 +189,7 @@ class AudioRecorder:
                 callback=self._callback,
             )
             self._stream.start()
+            self._start_spool()
             # 07.07 Bastian: welches Mikro + welche Rate wirklich? Ein Bluetooth-
             # Headset (Hands-Free, 8 kHz) liefert verwaschenes Audio -> Whisper
             # halluziniert / erkennt falsche Sprache. Das im Log sichtbar machen,
@@ -179,16 +212,128 @@ class AudioRecorder:
                 log.debug("Mikro-Info nicht ermittelbar: %s", ex)
             log.debug("Recording started (sr=%d, ch=%d).", self.sample_rate, self.channels)
 
+    # ---------- Live-Spool ----------
+
+    def _start_spool(self) -> None:
+        """Startet die Mitschrift. Fehler hier duerfen die Aufnahme NIE verhindern."""
+        if self.spool_dir is None:
+            return
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            spool = WavSpool(
+                self.spool_dir / f"recording_{ts}_partial.wav",
+                sample_rate=self.sample_rate,
+                channels=self.channels,
+            )
+            spool.open()
+        except Exception as ex:  # noqa: BLE001 - lieber ohne Netz aufnehmen als gar nicht
+            log.warning("Live-Mitschrift nicht startbar: %s", ex)
+            self._spool = None
+            return
+        self._spool = spool
+        self._spool_stop = threading.Event()
+        self._spool_thread = threading.Thread(
+            target=self._spool_loop,
+            args=(spool, self._spool_stop, self._frames),
+            daemon=True,
+            name="voice-flow-spool",
+        )
+        self._spool_thread.start()
+
+    def _spool_loop(
+        self, spool: WavSpool, stop_event: threading.Event, frames: list[np.ndarray]
+    ) -> None:
+        """Haengt neue Frames periodisch an die _partial.wav.
+
+        Arbeitet auf der Listen-REFERENZ vom Start: ersetzt stop() spaeter
+        `self._frames`, schreibt dieser Thread trotzdem seinen Rest fertig,
+        statt ins Leere zu greifen. Index-basiert, ohne Lock — der Callback
+        macht nur `append` (atomar in CPython), wir lesen nur bereits
+        geschriebene Positionen.
+        """
+        written = 0
+        while True:
+            last_round = stop_event.is_set()
+            try:
+                available = len(frames)
+                if available > written:
+                    chunk = np.concatenate(frames[written:available], axis=0)
+                    spool.write(chunk.tobytes())
+                    written = available
+            except Exception as ex:  # noqa: BLE001 - Mitschrift darf nie die Aufnahme kippen
+                log.warning("Live-Mitschrift-Schreibfehler: %s", ex)
+                return
+            if last_round:
+                return
+            stop_event.wait(FLUSH_INTERVAL_SEC)
+
+    def _finish_spool(self, keep: bool) -> Path | None:
+        """Beendet die Mitschrift. keep=True behaelt die Datei als Rettungsnetz."""
+        spool, stop_event, thread = self._spool, self._spool_stop, self._spool_thread
+        self._spool = self._spool_stop = self._spool_thread = None
+        if spool is None:
+            return None
+        if stop_event is not None:
+            stop_event.set()
+        if thread is not None:
+            # Kurz warten, damit der letzte Block noch landet. Der Thread ist
+            # Daemon — er blockiert das Beenden der App nie.
+            thread.join(timeout=5.0)
+        if keep:
+            spool.close()
+            return spool.path
+        spool.discard()
+        return None
+
+    # ---------- Stop ----------
+
+    def _close_stream_with_timeout(self, stream) -> bool:
+        """Schliesst den PortAudio-Stream, aber niemals laenger als STOP_TIMEOUT_SEC.
+
+        Returns True bei sauberem Schliessen, False wenn CoreAudio haengt.
+        Der haengende Thread bleibt als Daemon zurueck (er kommt nie wieder —
+        das ist ein Betriebssystem-Deadlock, nichts was wir aufloesen koennen),
+        aber die Aufnahme wird trotzdem ausgeliefert.
+        """
+        error: list[BaseException] = []
+
+        def _close() -> None:
+            try:
+                # close() blockt bis der Callback nicht mehr feuert (PortAudio-Garantie).
+                stream.stop()
+                stream.close()
+            except BaseException as ex:  # noqa: BLE001 - Fehler an den Aufrufer weitergeben
+                error.append(ex)
+
+        worker = threading.Thread(target=_close, daemon=True, name="voice-flow-stream-close")
+        worker.start()
+        worker.join(timeout=STOP_TIMEOUT_SEC)
+        if worker.is_alive():
+            return False
+        if error:
+            raise error[0]
+        return True
+
     def stop(self) -> bytes:
         with self._lock:
             if self._stream is None:
                 raise RuntimeError("AudioRecorder.stop() called without start().")
-            try:
-                # stream.close() blockt bis Callback nicht mehr feuert (PortAudio-Garantie).
-                self._stream.stop()
-                self._stream.close()
-            finally:
-                self._stream = None
+            stream = self._stream
+            # Referenz SOFORT freigeben: haengt das Schliessen, darf ein spaeterer
+            # start() nicht denken, es laufe noch eine Aufnahme.
+            self._stream = None
+
+        t0 = time.monotonic()
+        clean = self._close_stream_with_timeout(stream)
+        if not clean:
+            self.audio_system_stuck = True
+            log.error(
+                "Audio-Stop haengt seit %.1fs im Betriebssystem (CoreAudio/PortAudio) — "
+                "Aufnahme wird trotzdem gesichert. Voice Flow muss neu gestartet werden.",
+                time.monotonic() - t0,
+            )
+
+        with self._lock:
             # Snapshot der Frames INNERHALB des Locks, damit ein paralleler start()
             # nicht die Liste leeren kann waehrend wir sie noch lesen (Critic P0-4).
             frames_snapshot = self._frames
@@ -199,6 +344,13 @@ class AudioRecorder:
                 else 0.0
             )
             log.debug("Recording stopped, %d frames captured.", len(frames_snapshot))
+
+        # Sauberer Stop -> die vollstaendige WAV kommt aus dem RAM, Mitschrift weg.
+        # Haenger -> Mitschrift BEHALTEN: sie ist bei einem eingefrorenen oder
+        # abgeschossenen Prozess die einzige Kopie auf Platte.
+        kept = self._finish_spool(keep=not clean)
+        if kept is not None:
+            log.error("Aufnahme als Rettungsdatei gesichert: %s", kept)
         return self._frames_to_wav_bytes(frames_snapshot)
 
     @property

@@ -19,14 +19,21 @@ Auto-Cleanup beim Voice-Flow-Start (Retention, kein Endlos-Wachstum):
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 RECORDINGS_DIR = Path.home() / ".voice-flow" / "recordings"
-RETENTION_DAYS = 30
-MAX_TOTAL_BYTES = 500 * 1024 * 1024  # Groessen-Deckel ueber alle Archive/Backups
+# 16.08.2026 Bastian: "mp3 dateien laenger liegen lassen damit man immer recovern
+# kann". Ein Diktat ist oft erst Tage spaeter als luecken- oder fehlerhaft erkannt —
+# 30 Tage waren dafuer zu kurz. Opus-Archive kosten ~1 MB / 10 min, ein Jahr taeglicher
+# Nutzung passt locker unter den Deckel. Beides per .env uebersteuerbar.
+RETENTION_DAYS = int(os.getenv("VOICE_FLOW_RETENTION_DAYS", "365"))
+MAX_TOTAL_BYTES = int(
+    os.getenv("VOICE_FLOW_MAX_ARCHIVE_MB", "5000")
+) * 1024 * 1024  # Groessen-Deckel ueber alle Archive/Backups
 
 
 def save_recording(wav_bytes: bytes, suffix: str = "") -> Path:
@@ -119,6 +126,10 @@ def mark_suspect(path: Path) -> Path:
 
 def _is_open_work(f: Path) -> bool:
     """WAVs ohne _recovered/_archived-Marker = noch nicht transkribiertes Audio.
+
+    Das schliesst `_partial.wav` (Live-Mitschrift eines eingefrorenen oder
+    abgeschossenen Laufs, siehe spool.py) bewusst mit ein: sie ist dann die
+    einzige Kopie und muss die Retention ueberleben.
 
     Genau diese Dateien sind der Grund fuer das ganze Storage-Feature — sie
     sind fuer die Retention TABU (Critic P1: der Groessen-Deckel haette sonst

@@ -12,6 +12,7 @@ from voice_flow.gui_errors import show_error
 from voice_flow.overlay import RecordingOverlay
 from voice_flow.paste import paste_to_active_window
 from voice_flow.recording_storage import (
+    RECORDINGS_DIR,
     archive_recording,
     mark_failed,
     mark_suspect,
@@ -48,6 +49,9 @@ class VoiceFlowApp:
             sample_rate=config.sample_rate,
             channels=config.channels,
             device=self._current_device,
+            # Live-Mitschrift auf Platte: ohne sie lebt eine laufende Aufnahme nur
+            # im RAM und ist bei Deadlock/Absturz weg (Vorfall 16.08.2026).
+            spool_dir=RECORDINGS_DIR,
         )
         self.transcriber = Transcriber(
             api_key=config.openai_api_key,
@@ -210,6 +214,17 @@ class VoiceFlowApp:
                     self.overlay.hide()
             return
 
+        # CoreAudio haengt: die Aufnahme ist gerettet (Live-Mitschrift + RAM), aber
+        # dieser Prozess bekommt kein Mikro mehr. Ehrlich sagen statt so tun als ginge
+        # es weiter — der naechste F5 wuerde sonst still ins Leere laufen.
+        if getattr(self.recorder, "audio_system_stuck", False) and self.overlay:
+            self.overlay.show_info(
+                "Audio-System von macOS haengt (Mikro-Wechsel waehrend der Aufnahme). "
+                "Diese Aufnahme ist gesichert und wird noch transkribiert — "
+                "danach Voice Flow bitte neu starten.",
+                10000,
+            )
+
         threading.Thread(
             target=self._process_pipeline,
             args=(wav, duration),
@@ -296,6 +311,7 @@ class VoiceFlowApp:
         overlay.open_annotate thread-safe auf dem Qt-Thread. Der on_shoot-Callback
         laeuft ebenfalls auf dem Qt-Thread und legt das fertige PNG in den Bucket.
         """
+        log.debug("F6: Handler betreten (overlay=%s)", bool(self.overlay))
         if not self.overlay:
             return
         from voice_flow.screenshot import get_cursor_pos, pick_monitor
@@ -326,6 +342,7 @@ class VoiceFlowApp:
                     actions=[("Ordner", lambda d=sess.dir: _open_folder(d))],
                 )
 
+        log.debug("F6: open_annotate wird gerufen (monitor=%s)", mon)
         self.overlay.open_annotate(mon, on_shoot)
 
     # ---------- Pipeline ----------
@@ -583,9 +600,14 @@ def _copy_to_clipboard(text: str) -> None:
 
 
 def _open_folder(path) -> None:
-    """Toast-Action 'Ordner' — den Session-Bucket im Explorer oeffnen."""
+    """Toast-Action 'Ordner' — den Session-Bucket im Dateimanager oeffnen."""
     import os
+    import sys
     try:
-        os.startfile(str(path))
+        if sys.platform == "darwin":
+            import subprocess
+            subprocess.Popen(["open", str(path)])
+        else:
+            os.startfile(str(path))  # Windows
     except Exception as ex:
         log.warning("Ordner oeffnen fehlgeschlagen: %s", ex)
