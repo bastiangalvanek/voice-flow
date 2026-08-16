@@ -14,6 +14,7 @@ from voice_flow.paste import paste_to_active_window
 from voice_flow.recording_storage import (
     RECORDINGS_DIR,
     archive_recording,
+    list_pending_recordings,
     mark_failed,
     mark_suspect,
     save_recording,
@@ -552,6 +553,89 @@ class VoiceFlowApp:
             self.overlay.show_info(msg, duration_ms=3000)
         if self.config.enable_sound:
             beep_ready()
+        self.offer_pending_recovery()
+
+    def offer_pending_recovery(self) -> None:
+        """Liegengebliebene Aufnahmen sichtbar und per Klick einloesbar machen.
+
+        Vorher stand nur eine Log-Zeile mit einem Terminal-Befehl im Logfile —
+        fuer Bastian (kein Entwickler) faktisch unerreichbar: das Audio war
+        gerettet, aber er kam nicht dran. Bewusst KEINE Auto-Transkription:
+        jede Datei kostet einen API-Call, das entscheidet der User per Klick.
+        """
+        if not self.overlay:
+            return
+        try:
+            pending = list_pending_recordings()
+        except Exception as ex:  # noqa: BLE001 - Hinweis darf den Start nie kippen
+            log.debug("Pending-Pruefung fehlgeschlagen: %s", ex)
+            return
+        if not pending:
+            return
+
+        from voice_flow.notifications import ToastKind
+
+        minutes = sum(_wav_minutes(p) for p in pending)
+        self.overlay.notify(
+            ToastKind.ERROR,
+            f"{len(pending)} Aufnahme(n) ohne Text",
+            # Kurz halten: der Toast kuerzt laengere Zeilen mit "…" ab (selbst
+            # gesehen im Screenshot 16.08. — "transkribierb…").
+            f"~{minutes:.0f} Min Audio gesichert",
+            actions=[("Jetzt nachholen", lambda: self._recover_pending_async(pending))],
+            duration_ms=15000,
+        )
+
+    def _recover_pending_async(self, paths: list) -> None:
+        """Nachtranskription im Hintergrund — der Klick darf die UI nicht blockieren."""
+
+        def _run() -> None:
+            from voice_flow.recover import recover_file
+
+            done, failed, last = 0, 0, ""
+            for path in paths:
+                if not path.exists():  # zwischenzeitlich schon erledigt
+                    continue
+                try:
+                    text = recover_file(path, self.transcriber, self.config)
+                except Exception as ex:  # noqa: BLE001 - eine kaputte Datei stoppt den Rest nicht
+                    log.error("Nachholen fehlgeschlagen (%s): %s", path.name, ex)
+                    failed += 1
+                    continue
+                if text:
+                    done += 1
+                    last = text
+            if last:
+                # Bewusst NUR ins Clipboard (kein paste_to_active_window): der User
+                # klickt den Toast irgendwo, ein automatisches Cmd+V wuerde den Text
+                # in ein zufaelliges Fenster schiessen.
+                try:
+                    import pyperclip
+
+                    pyperclip.copy(last)
+                except Exception as ex:  # noqa: BLE001 - Clipboard ist Komfort
+                    log.debug("Clipboard nach Recovery nicht beschreibbar: %s", ex)
+            if not self.overlay:
+                return
+            from voice_flow.notifications import ToastKind
+
+            if done:
+                self.overlay.notify(
+                    ToastKind.SUCCESS,
+                    f"{done} Aufnahme(n) nachgeholt",
+                    "Letzter Text liegt in der Zwischenablage (Cmd+V)"
+                    + (f" · {failed} fehlgeschlagen" if failed else ""),
+                    duration_ms=12000,
+                )
+            else:
+                self.overlay.notify(
+                    ToastKind.ERROR,
+                    "Nachholen ergab keinen Text",
+                    "Aufnahmen bleiben gespeichert — vermutlich Stille.",
+                    duration_ms=10000,
+                )
+
+        threading.Thread(target=_run, daemon=True, name="voice-flow-recover").start()
 
     def shutdown(self) -> None:
         """Sauberes Shutdown: laufendes Recording stoppen, Audio unmuten, UI schliessen."""
@@ -588,6 +672,22 @@ class VoiceFlowApp:
 def _truncate(s: str, n: int) -> str:
     s = s.replace("\n", " ").strip()
     return s if len(s) <= n else s[:n] + "…"
+
+
+def _wav_minutes(path) -> float:
+    """Laenge einer WAV in Minuten — nur fuer die Anzeige im Hinweis.
+
+    Liest den Header statt der Datei (Backups sind bis zu dreistellige MB).
+    Unlesbar → 0.0, der Hinweis nennt dann eben eine kleinere Zahl.
+    """
+    import wave
+
+    try:
+        with wave.open(str(path), "rb") as wf:
+            rate = wf.getframerate()
+            return wf.getnframes() / rate / 60.0 if rate else 0.0
+    except Exception:  # noqa: BLE001 - Anzeige-Detail, nie ein Startfehler
+        return 0.0
 
 
 def _copy_to_clipboard(text: str) -> None:

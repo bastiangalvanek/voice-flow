@@ -213,3 +213,54 @@ def test_app_erzeugt_recorder_mit_spool(monkeypatch):
 
     src = inspect.getsource(app_mod.VoiceFlowApp.__init__)
     assert "spool_dir=RECORDINGS_DIR" in src
+
+
+# ---------- Der Rettungsweg muss ohne Terminal bedienbar sein ----------
+
+
+class _FakeOverlay:
+    def __init__(self):
+        self.toasts = []
+
+    def notify(self, kind, title, subtitle="", thumbnail_path=None, actions=None, duration_ms=0):
+        self.toasts.append({"kind": kind, "title": title, "sub": subtitle,
+                            "actions": actions or []})
+
+    def show_info(self, *a, **kw):
+        pass
+
+
+def _app_with_overlay(monkeypatch, tmp_path):
+    """VoiceFlowApp ohne __init__ (kein Mikro/kein Netz) — nur die Hinweis-Logik."""
+    import voice_flow.app as app_mod
+
+    monkeypatch.setattr(app_mod, "list_pending_recordings", lambda: sorted(
+        tmp_path.glob("recording_*.wav")))
+    app = object.__new__(app_mod.VoiceFlowApp)
+    app.overlay = _FakeOverlay()
+    return app
+
+
+def test_offene_aufnahme_wird_als_klickbarer_hinweis_gezeigt(monkeypatch, tmp_path):
+    """Vorher: nur eine Log-Zeile mit Terminal-Befehl — fuer den Nutzer unerreichbar."""
+    from voice_flow.spool import WavSpool
+
+    spool = WavSpool(tmp_path / "recording_20260816_224237_000_partial.wav")
+    spool.open()
+    spool.write(b"\x00\x01" * 16000 * 60)  # 60s
+    spool.close()
+
+    app = _app_with_overlay(monkeypatch, tmp_path)
+    app.offer_pending_recovery()
+
+    assert len(app.overlay.toasts) == 1
+    toast = app.overlay.toasts[0]
+    assert "1 Aufnahme" in toast["title"]
+    assert "~1 Min" in toast["sub"]  # Laenge aus dem WAV-Header
+    assert [label for label, _ in toast["actions"]] == ["Jetzt nachholen"]
+
+
+def test_ohne_offene_aufnahmen_kein_hinweis(monkeypatch, tmp_path):
+    app = _app_with_overlay(monkeypatch, tmp_path)
+    app.offer_pending_recovery()
+    assert app.overlay.toasts == []
