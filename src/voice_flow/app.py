@@ -144,22 +144,14 @@ class VoiceFlowApp:
 
     # ---------- Ziel-Modus: Pfade (Claude Code) vs. Bilder (AI-Web) ----------
 
-    def _effective_bundle_id(self) -> str | None:
-        """Die App, in die eingefuegt wird — Voice Flow selbst zaehlt nicht."""
-        current = target_mode.frontmost_bundle_id()
-        if current and current != target_mode.own_bundle_id():
-            return current
-        return self._target_bundle_id
-
     def resolved_paste_mode(self) -> str:
-        return target_mode.resolve_mode(self.settings.paste_mode, self._effective_bundle_id())
+        return self.settings.paste_mode
 
     def cycle_paste_mode(self) -> str:
-        """Klick auf den Modus-Chip: Auto -> Claude Code -> AI-Web -> Auto."""
-        new_setting = target_mode.next_setting(self.settings.paste_mode)
+        """Klick auf den Modus-Chip: Claude Code <-> AI-Web."""
+        new_setting = target_mode.next_mode(self.settings.paste_mode)
         self.settings.set_paste_mode(new_setting)
-        label = target_mode.chip_label(new_setting, self._target_bundle_id)
-        log.info("MODUS  %s (Einstellung=%s)", label, new_setting)
+        log.info("MODUS  %s", target_mode.label(new_setting))
         self._refresh_mode_chip()
         # Bewusst KEINE Fokus-Rueckgabe hier: gemessen 18.08. sprang der Fokus
         # dann bei jedem Klick zwischen Chip und Ziel-App hin und her, wodurch
@@ -185,12 +177,8 @@ class VoiceFlowApp:
     def _refresh_mode_chip(self) -> None:
         if not self.overlay:
             return
-        setting = self.settings.paste_mode
         try:
-            self.overlay.set_mode_chip(
-                target_mode.chip_label(setting, self._effective_bundle_id()),
-                target_mode.resolve_mode(setting, self._effective_bundle_id()),
-            )
+            self.overlay.set_mode_chip(self.settings.paste_mode)
         except Exception as ex:
             log.warning("Modus-Chip nicht aktualisierbar: %s", ex)
 

@@ -6,9 +6,9 @@ kann. Ein Web-Chat (Lovable, ChatGPT, claude.ai, Gemini) hat das Verzeichnis
 NICHT: dort ist der Pfad wertlos, dort muessen die Bilder als Dateien in die
 Zwischenablage und per zweitem Cmd+V hinterher.
 
-Zwei Modi, drei Einstellungen: "claude_code", "ai_web" und "auto" (entscheidet
-anhand der Vorder-App). Reine Logik, keine I/O — bis auf frontmost_bundle_id(),
-das als einzige Funktion das System fragt.
+Zwei Modi, umgeschaltet wird per Klick am Chip neben der Pille. Eine automatische
+Erkennung gab es kurz, ist auf Bastians Ansage vom 18.08 wieder raus
+("den web auto mode raus, will selbst klicken, by default claude code").
 """
 from __future__ import annotations
 
@@ -20,38 +20,21 @@ log = logging.getLogger(__name__)
 
 MODE_CLAUDE_CODE = "claude_code"
 MODE_AI_WEB = "ai_web"
-SETTING_AUTO = "auto"
 
-# Reihenfolge des Chip-Klicks: Auto -> Claude Code -> AI-Web -> Auto.
-SETTING_CYCLE = (SETTING_AUTO, MODE_CLAUDE_CODE, MODE_AI_WEB)
+DEFAULT_MODE = MODE_CLAUDE_CODE
+MODE_CYCLE = (MODE_CLAUDE_CODE, MODE_AI_WEB)
 
 LABELS = {
-    SETTING_AUTO: "Auto",
     MODE_CLAUDE_CODE: "Claude Code",
     MODE_AI_WEB: "AI-Web",
 }
 
-# Apps, deren Eingabefeld KEINEN Dateisystem-Zugriff hat -> Bilder einfuegen.
-# Browser + die Desktop-Huellen der Web-Chats (die sind innen auch nur Web).
-WEB_APP_BUNDLE_IDS = frozenset({
-    "com.google.chrome",
-    "com.google.chrome.canary",
-    "com.google.chrome.beta",
-    "com.apple.safari",
-    "com.apple.safaritechnologypreview",
-    "com.microsoft.edgemac",
-    "com.microsoft.edge",
-    "org.mozilla.firefox",
-    "org.mozilla.firefoxdeveloperedition",
-    "com.brave.browser",
-    "company.thebrowser.browser",     # Arc
-    "company.thebrowser.dia",          # Dia
-    "com.operasoftware.opera",
-    "com.vivaldi.vivaldi",
-    "com.openai.chat",                 # ChatGPT-Desktop
-    "com.anthropic.claudefordesktop",  # Claude-Desktop
-    "com.google.gemini.electron",
-})
+# Icon je Modus (liegt in assets/): Clawd die Pixel-Krabbe fuer Claude Code,
+# das runde Chrome-Zeichen fuer den Web-Modus.
+ICON_NAMES = {
+    MODE_CLAUDE_CODE: "mode_claude_code.png",
+    MODE_AI_WEB: "mode_ai_web.png",
+}
 
 
 def frontmost_bundle_id() -> str | None:
@@ -71,7 +54,7 @@ def frontmost_bundle_id() -> str | None:
 
 
 def own_bundle_id() -> str | None:
-    """Bundle-ID von Voice Flow selbst — um sie bei der Auto-Erkennung zu ignorieren."""
+    """Bundle-ID von Voice Flow selbst — um sie beim Fokus-Vergleich zu erkennen."""
     if sys.platform != "darwin":
         return None
     try:
@@ -111,35 +94,37 @@ def activate_bundle_id(bundle_id: str | None) -> bool:
         return False
 
 
-def resolve_mode(setting: str, bundle_id: str | None) -> str:
-    """Einstellung + Vorder-App -> effektiver Modus.
+def normalize_mode(value: str | None) -> str:
+    """Unbekannter/fehlender Wert -> Default (Claude Code)."""
+    return value if value in MODE_CYCLE else DEFAULT_MODE
 
-    Feste Einstellung gewinnt immer. Bei "auto" entscheidet die Vorder-App:
-    bekannter Web-Client -> ai_web, alles andere (Terminal, Editor, unbekannt)
-    -> claude_code. Unbekannt absichtlich auf claude_code: ein zu viel
-    eingefuegter Pfad ist harmlos, ein Bilderschwall in eine fremde App nicht.
+
+def next_mode(mode: str) -> str:
+    """Chip-Klick: zwischen den zwei Modi hin und her."""
+    return MODE_AI_WEB if normalize_mode(mode) == MODE_CLAUDE_CODE else MODE_CLAUDE_CODE
+
+
+def label(mode: str) -> str:
+    return LABELS[normalize_mode(mode)]
+
+
+def icon_path(mode: str) -> Path | None:
+    """Pfad zum Modus-Icon, oder None wenn die Datei fehlt.
+
+    Sucht neben dem Paket (Entwicklungsbaum) und im gebuendelten App-Ordner
+    (PyInstaller legt Daten unter sys._MEIPASS ab).
     """
-    if setting in (MODE_CLAUDE_CODE, MODE_AI_WEB):
-        return setting
-    if bundle_id and bundle_id.lower() in WEB_APP_BUNDLE_IDS:
-        return MODE_AI_WEB
-    return MODE_CLAUDE_CODE
-
-
-def next_setting(setting: str) -> str:
-    """Naechster Wert im Chip-Klick-Zyklus (unbekannter Wert -> Auto)."""
-    try:
-        idx = SETTING_CYCLE.index(setting)
-    except ValueError:
-        return SETTING_AUTO
-    return SETTING_CYCLE[(idx + 1) % len(SETTING_CYCLE)]
-
-
-def chip_label(setting: str, bundle_id: str | None) -> str:
-    """Text fuer den Modus-Chip: bei Auto zeigt er, worauf es hinauslaeuft."""
-    if setting == SETTING_AUTO:
-        return f"Auto · {LABELS[resolve_mode(setting, bundle_id)]}"
-    return LABELS.get(setting, LABELS[SETTING_AUTO])
+    name = ICON_NAMES[normalize_mode(mode)]
+    kandidaten = []
+    gebundelt = getattr(sys, "_MEIPASS", None)
+    if gebundelt:
+        kandidaten.append(Path(gebundelt) / "assets" / name)
+    kandidaten.append(Path(__file__).resolve().parents[2] / "assets" / name)
+    for pfad in kandidaten:
+        if pfad.exists():
+            return pfad
+    log.warning("Modus-Icon %s nicht gefunden (gesucht: %s)", name, kandidaten)
+    return None
 
 
 def capture_marker(path: str, index: int, mode: str) -> str:

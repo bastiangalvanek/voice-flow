@@ -51,15 +51,13 @@ class Settings:
 
     @property
     def paste_mode(self) -> str:
-        """Ziel-Modus-Einstellung: "auto" | "claude_code" | "ai_web".
+        """Ziel-Modus: "claude_code" (Default) oder "ai_web".
 
-        Default "auto" — die Vorder-App entscheidet (target_mode.resolve_mode).
-        Unbekannter Wert in der Datei faellt still auf "auto" zurueck.
+        Unbekannter oder fehlender Wert faellt still auf Claude Code zurueck.
         """
-        from voice_flow.target_mode import SETTING_AUTO, SETTING_CYCLE
+        from voice_flow.target_mode import normalize_mode
 
-        value = self._data.get("paste_mode")
-        return value if value in SETTING_CYCLE else SETTING_AUTO
+        return normalize_mode(self._data.get("paste_mode"))
 
     def set_paste_mode(self, mode: str) -> None:
         self._data["paste_mode"] = mode

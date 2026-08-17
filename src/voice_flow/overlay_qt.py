@@ -37,17 +37,19 @@ log = logging.getLogger(__name__)
 LOGO_PATH = resolve_logo_path()
 
 
-# ── Design Tokens ──────────────────────────────────────────────────────
-SURFACE_BASE = "#0B0B0F"
-SURFACE_RAISED = "#15151A"
-SURFACE_BORDER = "#26262E"
-TEXT_PRIMARY = "#F2F2F5"
-TEXT_SECONDARY = "#9B9BA3"
-TEXT_DIM = "#5C5C66"
-ACCENT_REC = "#FF453A"
-ACCENT_PROC = "#FFB340"
-ACCENT_OK = "#34D399"
-GALVANEK_ORANGE = "#F07320"
+# ── Design Tokens (eine Quelle: theme.py, damit der Modus-Chip dieselben nutzt) ──
+from voice_flow.theme import (  # noqa: E402  (Tokens, kein Qt-Import)
+    ACCENT_OK,
+    ACCENT_PROC,
+    ACCENT_REC,
+    GALVANEK_ORANGE,
+    SURFACE_BASE,
+    SURFACE_BORDER,
+    SURFACE_RAISED,
+    TEXT_DIM,
+    TEXT_PRIMARY,
+    TEXT_SECONDARY,
+)
 
 
 class _PillWidget:
@@ -642,11 +644,11 @@ class RecordingOverlay:
                 duration_ms=duration_ms,
             ))
 
-    def set_mode_chip(self, label: str, mode: str) -> None:
-        """Modus-Chip beschriften (thread-safe). Vor Chip-Existenz: gemerkt."""
-        self._mode_chip_state = (label, mode)
+    def set_mode_chip(self, mode: str) -> None:
+        """Modus-Chip auf einen Modus stellen (thread-safe). Vor Chip-Existenz: gemerkt."""
+        self._mode_chip_state = mode
         if self._chip is not None:
-            self._chip.sig_set_mode.emit(label, mode)
+            self._chip.sig_set_mode.emit(mode)
 
     def set_mode_click_handler(self, cb: Callable[[], None]) -> None:
         """Was ein Klick auf den Chip macht — vom App-Controller gesetzt."""
@@ -775,7 +777,7 @@ class RecordingOverlay:
                     _PillWidget.PILL_HEIGHT,
                 ))
                 if self._mode_chip_state is not None:
-                    self._chip.sig_set_mode.emit(*self._mode_chip_state)
+                    self._chip.sig_set_mode.emit(self._mode_chip_state)
             except Exception as ex:
                 log.warning("Modus-Chip-Init fehlgeschlagen: %s", ex)
                 self._chip = None

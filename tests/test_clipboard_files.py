@@ -14,7 +14,7 @@ from PIL import Image
 
 from voice_flow.clipboard_files import copy_files_to_clipboard
 from voice_flow.settings import Settings
-from voice_flow.target_mode import MODE_AI_WEB, SETTING_AUTO
+from voice_flow.target_mode import MODE_AI_WEB, MODE_CLAUDE_CODE
 
 
 def _png(path, color="red"):
@@ -47,13 +47,13 @@ def test_drei_dateien_liegen_als_drei_pasteboard_items(tmp_path):
         assert "public.file-url" in list(item.types())
 
 
-def test_paste_mode_wird_persistiert_und_faellt_bei_muell_auf_auto(tmp_path):
+def test_paste_mode_wird_persistiert_und_faellt_bei_muell_auf_claude_code(tmp_path):
     path = tmp_path / "settings.json"
     s = Settings(path=path)
-    assert s.paste_mode == SETTING_AUTO  # Default
+    assert s.paste_mode == MODE_CLAUDE_CODE  # Default
 
     s.set_paste_mode(MODE_AI_WEB)
     assert Settings(path=path).paste_mode == MODE_AI_WEB  # ueberlebt Neustart
 
     path.write_text('{"paste_mode": "quatsch"}', encoding="utf-8")
-    assert Settings(path=path).paste_mode == SETTING_AUTO
+    assert Settings(path=path).paste_mode == MODE_CLAUDE_CODE

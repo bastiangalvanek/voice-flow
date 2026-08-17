@@ -11,7 +11,8 @@ Zwei Wege zum Chip:
   * im Ruhezustand erscheint er, sobald die Maus in die Pillen-Zone unten in der
     Mitte fahrt (Hover-Poll per QCursor, kein System-Zugriff noetig).
 
-Klick = naechste Einstellung (Auto -> Claude Code -> AI-Web -> Auto).
+Klick = anderer Modus (Claude Code <-> AI-Web). Der Chip zeigt das Zeichen des
+Ziels: Clawd, das Claude-Code-Maskottchen, bzw. das runde Chrome-Zeichen.
 geometry_beside() ist reine Mathematik und unit-getestet.
 """
 from __future__ import annotations
@@ -19,24 +20,23 @@ from __future__ import annotations
 import logging
 import time
 
-from voice_flow.target_mode import MODE_AI_WEB
+from voice_flow.target_mode import icon_path
+from voice_flow.target_mode import label as mode_label
 
 log = logging.getLogger(__name__)
 
-CHIP_HEIGHT = 26
-CHIP_RADIUS = 13
+# Optik wie die Aufnahme-Pille: gleiche Hoehe, gleicher Radius, gleiche Farben
+# (Bastian 18.08: "einfach die gleiche Farbe wie bei der Standard-Voice-Flow-Pille").
+CHIP_HEIGHT = 34
+CHIP_RADIUS = 17
 CHIP_PADDING_X = 12
-CHIP_GAP = 8            # Abstand zur Pille
-CHIP_MIN_WIDTH = 96
+CHIP_GAP = 8              # Abstand zur Pille
+CHIP_ICON_HEIGHT = 22
+CHIP_ICON_GAP = 8
+CHIP_MIN_WIDTH = 92
 HOVER_POLL_MS = 220
-HOVER_MARGIN = 34       # wie weit um die Pille herum der Hover schon zaehlt
+HOVER_MARGIN = 34         # wie weit um die Pille herum der Hover schon zaehlt
 CLICK_DEBOUNCE_SEC = 0.4  # doppelt zugestellte Klicks zusammenfassen
-
-SURFACE = "#15151A"
-BORDER = "#2E2E38"
-TEXT = "#E6E6EA"
-DOT_WEB = "#F07320"       # Galvanek-Orange = Bilder gehen raus
-DOT_CLAUDE = "#6E8BFF"    # Blau = Pfade fuer Claude Code
 
 
 def geometry_beside(pill_rect: tuple[int, int, int, int], chip_width: int,
@@ -56,12 +56,15 @@ def geometry_beside(pill_rect: tuple[int, int, int, int], chip_width: int,
 
 
 def build_mode_chip_class():
-    from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal, pyqtSlot
-    from PyQt6.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath
+    from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal, pyqtSlot
+    from PyQt6.QtGui import (QColor, QCursor, QFont, QFontMetrics, QPainter,
+                             QPainterPath, QPixmap)
     from PyQt6.QtWidgets import QWidget
 
+    from voice_flow.theme import SURFACE_BASE, SURFACE_BORDER, TEXT_SECONDARY
+
     class ModeChipWidget(QWidget):
-        sig_set_mode = pyqtSignal(str, str)     # (label, effektiver Modus)
+        sig_set_mode = pyqtSignal(str)          # Modus ("claude_code" | "ai_web")
         sig_place = pyqtSignal(object)          # pill_rect oder None (= verstecken)
 
         def __init__(self, on_click=None):
@@ -69,6 +72,7 @@ def build_mode_chip_class():
             self._on_click = on_click
             self._label = ""
             self._mode = ""
+            self._icon: QPixmap | None = None
             self._pill_rect: tuple | None = None
             self._pinned = False   # True = Pille ist sichtbar, Chip bleibt
             self._last_click = 0.0
@@ -104,12 +108,15 @@ def build_mode_chip_class():
             self.hide()
 
         # ── Zustand ──────────────────────────────────────────────────
-        @pyqtSlot(str, str)
-        def _apply_mode(self, label: str, mode: str) -> None:
-            self._label = label
+        @pyqtSlot(str)
+        def _apply_mode(self, mode: str) -> None:
             self._mode = mode
+            self._label = mode_label(mode)
+            self._icon = self._load_icon(mode)
+            icon_breite = self._icon.width() if self._icon else 0
             width = max(CHIP_MIN_WIDTH,
-                        self._metrics.horizontalAdvance(label) + CHIP_PADDING_X * 2 + 14)
+                        CHIP_PADDING_X * 2 + icon_breite + CHIP_ICON_GAP
+                        + self._metrics.horizontalAdvance(self._label))
             self.resize(width, CHIP_HEIGHT)
             if self._pill_rect:
                 self._move_beside(self._pill_rect)
@@ -127,6 +134,18 @@ def build_mode_chip_class():
             self._move_beside(self._pill_rect)
             self.show()
             self.raise_()
+
+        def _load_icon(self, mode: str):
+            """Modus-Icon laden und auf Chip-Hoehe bringen (harte Pixelkanten)."""
+            pfad = icon_path(mode)
+            if pfad is None:
+                return None
+            pix = QPixmap(str(pfad))
+            if pix.isNull():
+                log.warning("Modus-Icon %s nicht ladbar.", pfad)
+                return None
+            return pix.scaledToHeight(CHIP_ICON_HEIGHT,
+                                      Qt.TransformationMode.SmoothTransformation)
 
         def set_idle_rect(self, rect) -> None:
             """Zone, in der die Pille erscheint — Basis fuer den Hover im Ruhezustand."""
@@ -197,20 +216,18 @@ def build_mode_chip_class():
             rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
             path = QPainterPath()
             path.addRoundedRect(rect, CHIP_RADIUS, CHIP_RADIUS)
-            painter.fillPath(path, QColor(SURFACE))
-            painter.strokePath(path, QColor(BORDER))
+            painter.fillPath(path, QColor(SURFACE_BASE))
+            painter.strokePath(path, QColor(SURFACE_BORDER))
 
-            dot_color = QColor(DOT_WEB if self._mode == MODE_AI_WEB else DOT_CLAUDE)
-            cy = self.height() / 2
-            painter.setBrush(dot_color)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(QPointF(CHIP_PADDING_X + 3, cy), 3.5, 3.5)
+            x = CHIP_PADDING_X
+            if self._icon is not None:
+                painter.drawPixmap(x, (self.height() - self._icon.height()) // 2, self._icon)
+                x += self._icon.width() + CHIP_ICON_GAP
 
             painter.setFont(self._font)
-            painter.setPen(QColor(TEXT))
-            text_x = CHIP_PADDING_X + 14
+            painter.setPen(QColor(TEXT_SECONDARY))
             painter.drawText(
-                QRectF(text_x, 0, self.width() - text_x - CHIP_PADDING_X, self.height()),
+                QRectF(x, 0, self.width() - x - CHIP_PADDING_X, self.height()),
                 int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
                 self._label,
             )
