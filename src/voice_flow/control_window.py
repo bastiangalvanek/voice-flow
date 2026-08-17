@@ -52,6 +52,7 @@ _QSS = """
     selection-background-color: #2A2A33; outline: none;
 }
 #hint { color: #5C5C66; font-size: 11px; }
+#signature { color: #6E6E7A; font-size: 11px; font-weight: 600; letter-spacing: 0.2px; padding-top: 2px; }
 #quit {
     background: #1B1216; color: #FF6B61; border: 1px solid #3A2429;
     border-radius: 10px; padding: 11px; font-size: 13px; font-weight: 700;
@@ -79,8 +80,8 @@ def build_control_window_class():
             self.setObjectName("root")
             self.setWindowTitle("Voice Flow")
             # 27.06: dritte Hotkey-Zeile (F6) -> +28px. + Mikrofon-Picker -> +62px.
-            self.setMinimumSize(390, 372)
-            self.resize(390, 372)
+            self.setMinimumSize(390, 396)   # +24px fuer die Signatur-Zeile
+            self.resize(390, 396)
 
             logo = resolve_logo_path()
             # Taskleisten-Button: scharfe .ico bevorzugen, sonst logo.png.
@@ -157,6 +158,13 @@ def build_control_window_class():
             hint.setObjectName("hint")
             hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             root.addWidget(hint)
+
+            # 18.08 Bastian: "developed with Herz by Bastian Galvanek" — steht in
+            # beiden Fassungen (Mac und Windows) unten im Fenster.
+            signatur = QLabel("developed with ❤️ by Bastian Galvanek")
+            signatur.setObjectName("signature")
+            signatur.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            root.addWidget(signatur)
 
             self.sig_status.connect(self._apply_status)
             self.sig_show.connect(self._do_show)
