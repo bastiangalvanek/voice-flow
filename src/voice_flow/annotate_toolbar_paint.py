@@ -1,104 +1,118 @@
-"""Qt-Rendering der vertikalen Loom-Toolbar (Pille + Button-Glyphen).
+"""Qt-Rendering der Zeichen-Leiste im Lovable-Stil.
 
-Getrennt von annotate.py, damit die Zeichen-Overlay-Datei klein bleibt und die
-Icon-Render-Verantwortung bei der Toolbar liegt. Reine Mal-Logik, keine State-
-Aenderung. Die konkreten Qt-Klassen kommen per Bundle rein (Factory-Pattern wie
-im restlichen Projekt), damit kein Top-Level-Qt-Import noetig ist.
+18.08 Bastian: "1:1 wie bei Lovable, auch vom UX-Gefuehl". Das heisst hier:
+dunkle schwebende Leiste, der aktive Stift-Knopf mit lila Ring und Beschriftung
+"Annotation", danach Zurueck, Vor und "Clear" als Text — ausgegraut, solange
+nichts gezeichnet ist. Beim Ueberfahren hellt der Knopf leicht auf.
+
+Reine Mal-Logik, keine Zustandsaenderung. Die Qt-Klassen kommen per Bundle rein
+(Factory-Muster wie im Rest des Projekts).
 """
 from __future__ import annotations
 
-from voice_flow.annotate_toolbar import PALETTE, ToolbarItem, pill_rect
+from voice_flow.annotate_toolbar import ToolbarItem, is_enabled, pill_rect
+
+# Farben aus Lovables Leiste abgelesen.
+BAR_BG = (22, 22, 27, 242)
+BAR_BORDER = (255, 255, 255, 20)
+ACTIVE_RING = (124, 106, 255)      # lila wie Lovables aktiver Annotation-Knopf
+ACTIVE_TEXT = (240, 240, 245)
+IDLE_TEXT = (205, 205, 214)
+DISABLED_TEXT = (255, 255, 255, 70)
+HOVER_FILL = (255, 255, 255, 22)
 
 
 def paint_toolbar(p, items: list[ToolbarItem], active_tool: str,
-                  active_color_idx: int, qt) -> None:
-    """Malt Pille + alle Buttons. `qt` = build_annotate_class-Qt-Bundle."""
+                  qt, hat_striche: bool = True, hover_value=None) -> None:
+    """Malt die Leiste samt Knoepfen.
+
+    hat_striche: steuert die ausgegrauten Knoepfe (Zurueck/Vor/Clear).
+    hover_value: value des Knopfes unter der Maus, oder None.
+    """
     QColor, QPen, QPainterPath, QRectF = qt.QColor, qt.QPen, qt.QPainterPath, qt.QRectF
     left, top, w, h = pill_rect(items)
-    pill = QPainterPath()
-    pill.addRoundedRect(QRectF(left, top, w, h), w / 2, w / 2)
-    p.fillPath(pill, QColor(20, 20, 26, 235))
-    p.setPen(QPen(QColor(255, 255, 255, 22), 1))
-    p.drawPath(pill)
+    leiste = QPainterPath()
+    leiste.addRoundedRect(QRectF(left, top, w, h), h / 2, h / 2)
+    p.fillPath(leiste, QColor(*BAR_BG))
+    p.setPen(QPen(QColor(*BAR_BORDER), 1))
+    p.drawPath(leiste)
 
     for it in items:
-        active = (
-            (it.kind == "tool" and it.value == active_tool)
-            or (it.kind == "color" and it.value == active_color_idx)
-        )
-        _paint_button(p, it, active, qt)
+        aktiv = it.kind == "tool" and it.value == active_tool
+        an = is_enabled(it, hat_striche)
+        _paint_button(p, it, aktiv=aktiv, enabled=an,
+                      hover=(hover_value is not None and it.value == hover_value and an),
+                      qt=qt)
 
 
-def _paint_button(p, it: ToolbarItem, active: bool, qt) -> None:
-    QColor, QPen, QBrush = qt.QColor, qt.QPen, qt.QBrush
-    QRectF, QPainterPath, QPointF, Qt = qt.QRectF, qt.QPainterPath, qt.QPointF, qt.Qt
-    cx, cy = it.x + it.size / 2, it.y + it.size / 2
+def _paint_button(p, it: ToolbarItem, aktiv: bool, enabled: bool, hover: bool, qt) -> None:
+    QColor, QPen, QRectF, QPainterPath = qt.QColor, qt.QPen, qt.QRectF, qt.QPainterPath
+    Qt = qt.Qt
 
-    if active:
-        hl = QPainterPath()
-        hl.addRoundedRect(QRectF(it.x, it.y, it.size, it.size), 9, 9)
-        p.fillPath(hl, QColor(255, 255, 255, 28))
+    if hover and not aktiv:
+        fl = QPainterPath()
+        fl.addRoundedRect(QRectF(it.x, it.y, it.width, it.height), 8, 8)
+        p.fillPath(fl, QColor(*HOVER_FILL))
 
-    pen = QPen(QColor(235, 235, 240), 2)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(pen)
+    if aktiv:
+        ring = QPainterPath()
+        ring.addRoundedRect(QRectF(it.x + 0.5, it.y + 0.5, it.width - 1, it.height - 1), 8, 8)
+        p.fillPath(ring, QColor(124, 106, 255, 34))
+        p.setPen(QPen(QColor(*ACTIVE_RING), 1.4))
+        p.drawPath(ring)
+
+    if enabled:
+        farbe = QColor(*ACTIVE_TEXT) if aktiv else QColor(*IDLE_TEXT)
+    else:
+        farbe = QColor(*DISABLED_TEXT)
+
+    stift = QPen(farbe, 1.8)
+    stift.setCapStyle(Qt.PenCapStyle.RoundCap)
+    stift.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(stift)
     p.setBrush(Qt.BrushStyle.NoBrush)
 
-    if it.kind == "color":
-        p.setBrush(QBrush(QColor(*PALETTE[int(it.value)])))
-        ring = QColor(255, 255, 255, 235 if active else 90)
-        p.setPen(QPen(ring, 2 if active else 1))
-        p.drawEllipse(QPointF(cx, cy), 9, 9)
-        return
+    x = it.x + (14 if it.label else it.width / 2 - 0)
+    cy = it.y + it.height / 2
+    if it.icon:
+        cx = (it.x + 18) if it.label else (it.x + it.width / 2)
+        _paint_icon(p, it.icon, cx, cy, farbe, qt)
+        x = cx + 14
 
-    if it.kind == "tool":
-        _paint_tool_glyph(p, str(it.value), cx, cy, QPointF, QRectF)
-        return
-
-    _paint_action_glyph(p, str(it.value), cx, cy, qt)
-
-
-def _paint_tool_glyph(p, value: str, cx: float, cy: float, QPointF, QRectF) -> None:
-    if value == "pen":
-        p.drawLine(QPointF(cx - 8, cy + 8), QPointF(cx + 6, cy - 6))
-        p.drawLine(QPointF(cx + 6, cy - 6), QPointF(cx + 9, cy - 3))
-        p.drawLine(QPointF(cx + 9, cy - 3), QPointF(cx - 5, cy + 11))
-    elif value == "arrow":
-        p.drawLine(QPointF(cx - 8, cy + 8), QPointF(cx + 8, cy - 8))
-        p.drawLine(QPointF(cx + 8, cy - 8), QPointF(cx + 2, cy - 8))
-        p.drawLine(QPointF(cx + 8, cy - 8), QPointF(cx + 8, cy - 2))
-    elif value == "rect":
-        p.drawRect(QRectF(cx - 8, cy - 6, 16, 12))
+    if it.label:
+        schrift = p.font()
+        schrift.setPointSizeF(11.5)
+        schrift.setWeight(qt.QFont.Weight.DemiBold if aktiv else qt.QFont.Weight.Medium)
+        p.setFont(schrift)
+        p.setPen(QPen(farbe))
+        p.drawText(
+            QRectF(x, it.y, it.x + it.width - x - 8, it.height),
+            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+            it.label,
+        )
 
 
-def _paint_action_glyph(p, action: str, cx: float, cy: float, qt) -> None:
-    QColor, QPen, QPainterPath = qt.QColor, qt.QPen, qt.QPainterPath
-    QRectF, QPointF = qt.QRectF, qt.QPointF
-    if action == "undo":
-        p.drawArc(QRectF(cx - 8, cy - 8, 16, 16), 40 * 16, 250 * 16)
-        p.drawLine(QPointF(cx - 8, cy - 4), QPointF(cx - 8, cy - 9))
-        p.drawLine(QPointF(cx - 8, cy - 9), QPointF(cx - 3, cy - 9))
-    elif action == "redo":
-        # Gespiegelter Undo-Bogen: Pfeil zeigt nach rechts.
-        p.drawArc(QRectF(cx - 8, cy - 8, 16, 16), 290 * 16, 250 * 16)
-        p.drawLine(QPointF(cx + 8, cy - 4), QPointF(cx + 8, cy - 9))
-        p.drawLine(QPointF(cx + 8, cy - 9), QPointF(cx + 3, cy - 9))
-    elif action == "clear":
-        # Muelltonne (klar von cancel-X unterscheidbar): Deckel + Korpus + Streben.
-        p.drawLine(QPointF(cx - 8, cy - 6), QPointF(cx + 8, cy - 6))   # Deckel-Linie
-        p.drawLine(QPointF(cx - 3, cy - 9), QPointF(cx + 3, cy - 9))   # Griff oben
-        p.drawRect(QRectF(cx - 6, cy - 6, 12, 14))                     # Korpus
-        p.drawLine(QPointF(cx - 2, cy - 2), QPointF(cx - 2, cy + 5))   # Strebe links
-        p.drawLine(QPointF(cx + 2, cy - 2), QPointF(cx + 2, cy + 5))   # Strebe rechts
-    elif action == "shoot":
-        disc = QPainterPath()
-        disc.addEllipse(QPointF(cx, cy), 13, 13)
-        p.fillPath(disc, QColor(52, 211, 153))
-        p.setPen(QPen(QColor(11, 11, 15), 2.2))
-        p.drawRoundedRect(QRectF(cx - 6, cy - 4, 12, 9), 2, 2)
-        p.drawEllipse(QPointF(cx, cy + 0.5), 2.6, 2.6)
-    elif action == "cancel":
-        p.setPen(QPen(QColor(255, 99, 97), 2.4))
-        p.drawLine(QPointF(cx - 6, cy - 6), QPointF(cx + 6, cy + 6))
-        p.drawLine(QPointF(cx + 6, cy - 6), QPointF(cx - 6, cy + 6))
+def _paint_icon(p, name: str, cx: float, cy: float, farbe, qt) -> None:
+    QRectF, QPointF, QColor, QPen = qt.QRectF, qt.QPointF, qt.QColor, qt.QPen
+    if name == "pen":
+        p.drawLine(QPointF(cx - 6, cy + 6), QPointF(cx + 4, cy - 4))
+        p.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx + 6, cy - 2))
+        p.drawLine(QPointF(cx + 6, cy - 2), QPointF(cx - 4, cy + 8))
+        p.drawLine(QPointF(cx - 4, cy + 8), QPointF(cx - 7, cy + 8))
+    elif name == "undo":
+        p.drawArc(QRectF(cx - 7, cy - 7, 14, 14), 40 * 16, 250 * 16)
+        p.drawLine(QPointF(cx - 7, cy - 3), QPointF(cx - 7, cy - 8))
+        p.drawLine(QPointF(cx - 7, cy - 8), QPointF(cx - 2, cy - 8))
+    elif name == "redo":
+        p.drawArc(QRectF(cx - 7, cy - 7, 14, 14), 290 * 16, 250 * 16)
+        p.drawLine(QPointF(cx + 7, cy - 3), QPointF(cx + 7, cy - 8))
+        p.drawLine(QPointF(cx + 7, cy - 8), QPointF(cx + 2, cy - 8))
+    elif name == "shoot":
+        # Kamera: Voice-Flow-eigen, nimmt den Bildschirm mit den Markierungen auf.
+        p.drawRoundedRect(QRectF(cx - 8, cy - 5, 16, 12), 2.5, 2.5)
+        p.drawLine(QPointF(cx - 3, cy - 5), QPointF(cx - 1.5, cy - 8))
+        p.drawLine(QPointF(cx - 1.5, cy - 8), QPointF(cx + 2, cy - 8))
+        p.drawEllipse(QPointF(cx, cy + 1), 3.2, 3.2)
+    elif name == "cancel":
+        p.drawLine(QPointF(cx - 5, cy - 5), QPointF(cx + 5, cy + 5))
+        p.drawLine(QPointF(cx + 5, cy - 5), QPointF(cx - 5, cy + 5))

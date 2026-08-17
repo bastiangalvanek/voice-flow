@@ -21,8 +21,9 @@ from collections.abc import Callable
 from PIL import Image, ImageDraw
 
 from voice_flow.shape_snap import snap
-from voice_flow.annotate_toolbar import (
-    PALETTE,
+from voice_flow.annotate_toolbar import (  # noqa: F401
+    is_enabled,
+    STROKE_COLOR,
     ToolbarItem,
     build_toolbar,
     hit_test,
@@ -118,13 +119,14 @@ def build_annotate_class():
     from types import SimpleNamespace
 
     from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
-    from PyQt6.QtGui import QBrush, QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPolygonF
+    from PyQt6.QtGui import (QBrush, QColor, QFont, QGuiApplication, QPainter,
+                             QPainterPath, QPen, QPolygonF)
     from PyQt6.QtWidgets import QWidget
 
     # Qt-Klassen-Bundle fuer den ausgelagerten Toolbar-Renderer.
     _qt = SimpleNamespace(
         QColor=QColor, QPen=QPen, QBrush=QBrush, QRectF=QRectF,
-        QPainterPath=QPainterPath, QPointF=QPointF, Qt=Qt,
+        QPainterPath=QPainterPath, QPointF=QPointF, Qt=Qt, QFont=QFont,
     )
 
     def _screen_for(monitor: dict):
@@ -147,7 +149,6 @@ def build_annotate_class():
             self._redo_stack: list[dict] = []
             self._current: dict | None = None
             self._tool = "pen"
-            self._color_idx = 0
             self._fired = False  # genau ein on_shoot pro Overlay
 
             self.setWindowFlags(
@@ -167,7 +168,10 @@ def build_annotate_class():
             scr = _screen_for(monitor)
             g = scr.geometry()  # logische Koords
             self.setGeometry(g.x(), g.y(), g.width(), g.height())
-            self._toolbar: list[ToolbarItem] = build_toolbar(g.height())
+            # 18.08 Bastian: Leiste waagerecht unten mittig, direkt ueber der
+            # Aufnahme-Pille, statt senkrecht am linken Rand.
+            self._toolbar: list[ToolbarItem] = build_toolbar(g.width(), g.height())
+            self._hover_value = None      # Knopf unter der Maus (fuer den Hover)
 
             self._fade = QTimer(self)
             self._fade.setSingleShot(True)
@@ -181,7 +185,8 @@ def build_annotate_class():
         # ---- State-Helfer ----
 
         def _color(self) -> tuple[int, int, int]:
-            return PALETTE[self._color_idx]
+            # Wie bei Lovable: eine Farbe, keine Auswahl.
+            return STROKE_COLOR
 
         def _width(self) -> int:
             return 5
@@ -202,7 +207,8 @@ def build_annotate_class():
             pt = (int(pos.x()), int(pos.y()))
             hit = hit_test(pt, self._toolbar)
             if hit is not None:
-                self._activate(hit)
+                if is_enabled(hit, bool(self._strokes)):
+                    self._activate(hit)
                 return
             self._current = {
                 "type": self._tool, "color": self._color(),
@@ -211,6 +217,13 @@ def build_annotate_class():
             self.update()
 
         def mouseMoveEvent(self, e):
+            # Hover in der Leiste nachfuehren (Lovable hellt den Knopf auf).
+            pos_h = e.position()
+            treffer = hit_test((int(pos_h.x()), int(pos_h.y())), self._toolbar)
+            neuer_hover = treffer.value if treffer is not None else None
+            if neuer_hover != self._hover_value:
+                self._hover_value = neuer_hover
+                self.update()
             if self._current is None:
                 return
             pos = e.position()
@@ -218,7 +231,7 @@ def build_annotate_class():
             if self._current["type"] == "pen":
                 self._current["points"].append(pt)
             else:
-                # arrow/rect: nur Start + aktuelles Ende
+                # arrow/rect/ellipse: nur Start + aktuelles Ende
                 self._current["points"] = [self._current["points"][0], pt]
             self.update()
 
@@ -243,8 +256,6 @@ def build_annotate_class():
         def _activate(self, item: ToolbarItem) -> None:
             if item.kind == "tool":
                 self._tool = str(item.value)
-            elif item.kind == "color":
-                self._color_idx = int(item.value)
             elif item.kind == "action":
                 self._do_action(str(item.value))
             self.update()
@@ -376,7 +387,9 @@ def build_annotate_class():
                            QPointF(p1[0] + rx * head, p1[1] + ry * head))
 
         def _paint_toolbar(self, p):
-            paint_toolbar(p, self._toolbar, self._tool, self._color_idx, _qt)
+            paint_toolbar(p, self._toolbar, self._tool, _qt,
+                          hat_striche=bool(self._strokes),
+                          hover_value=self._hover_value)
 
         def closeEvent(self, e):
             self._fade.stop()

@@ -70,6 +70,13 @@ class _PillWidget:
 
     HALO_RADIUS = 22
 
+    # 18.08 Bastian: "ich komme jetzt nicht mehr rein wegen einer Pille von dir"
+    # — kommt die Maus in die Pillen-Zone, gleiten Pille und Chip nach oben und
+    # geben preis, was darunter liegt (bei ihm: Lovables Annotations-Leiste).
+    DODGE_LIFT = 62          # so weit nach oben
+    DODGE_MARGIN = 26        # ab diesem Abstand zur Pille wird ausgewichen
+    DODGE_SPEED = 0.22       # Annaeherung pro Bild (0..1), ergibt weiches Gleiten
+
     WIDTH_INFO = 220
     WIDTH_RECORDING = 250
     WIDTH_PROCESSING = 200
@@ -131,6 +138,8 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
                 [0.0] * _PillWidget.WAVE_SAMPLES, maxlen=_PillWidget.WAVE_SAMPLES
             )
             self._processing_phase = 0.0
+            self._dodge_offset = 0.0      # aktuelle Ausweich-Hoehe in Pixeln
+            self._base_y = 0              # Ruhelage, ohne Ausweichen
             self._hide_timer = QTimer(self)
             self._hide_timer.setSingleShot(True)
             self._hide_timer.timeout.connect(self._on_hide_timer)
@@ -222,7 +231,38 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
             screen = QApplication.primaryScreen().availableGeometry()
             x = screen.x() + (screen.width() - self.width()) // 2
             y = screen.y() + screen.height() - self.height() - _PillWidget.BOTTOM_OFFSET + self._shadow_padding
-            self.move(x, y)
+            self._base_y = y
+            self.move(x, int(y - self._dodge_offset))
+
+        def _update_dodge(self) -> None:
+            """Maus in der Naehe? Dann Pille (und Chip) nach oben gleiten lassen.
+
+            Gemessen wird gegen die RUHELAGE, nicht gegen die aktuelle Position:
+            sonst wandert die Zone mit der Pille mit, die Maus faellt sofort
+            wieder heraus und das Ganze zappelt (erster Versuch kam so nur 3 von
+            62 Pixeln hoch). Ist bereits ausgewichen, zaehlt zusaetzlich der
+            Korridor nach oben, damit es am Rand nicht flackert.
+            """
+            from PyQt6.QtGui import QCursor
+
+            links = self.x() + self._shadow_padding
+            oben = self._base_y + self._shadow_padding
+            breite, hoehe = self._current_width, self._pill_height
+            pos = QCursor.pos()
+            rand = _PillWidget.DODGE_MARGIN
+            oben_grenze = oben - rand
+            if self._dodge_offset > 1:
+                oben_grenze -= _PillWidget.DODGE_LIFT
+            drin = (links - rand <= pos.x() <= links + breite + rand
+                    and oben_grenze <= pos.y() <= oben + hoehe + rand)
+            ziel = float(_PillWidget.DODGE_LIFT) if drin else 0.0
+            if abs(ziel - self._dodge_offset) < 0.5:
+                self._dodge_offset = ziel
+                return
+            self._dodge_offset += (ziel - self._dodge_offset) * _PillWidget.DODGE_SPEED
+            self.move(self.x(), int(self._base_y - self._dodge_offset))
+            self._chip_dirty = True
+            self._notify_chip(self.visible_pill_rect())
 
         # ── State Transitions ────────────────────────────────────────
 
@@ -326,6 +366,7 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
             self._tick += 1
             if self._state in (self.STATE_RECORDING, self.STATE_PROCESSING):
                 self._advance_animation()
+            self._update_dodge()
             self.update()
 
         def _advance_animation(self):
@@ -584,6 +625,7 @@ class RecordingOverlay:
         self._chip = None  # ModeChipWidget (Claude Code vs. AI-Web)
         self._mode_chip_state = None  # (label, mode), falls vor dem Chip gesetzt
         self._on_mode_click_cb: Optional[Callable[[], None]] = None
+        self._on_annotate_click_cb: Optional[Callable[[], None]] = None
         self._on_quit_cb: Optional[Callable[[], None]] = None
         self._app = None
         self._ready = threading.Event()
@@ -657,6 +699,14 @@ class RecordingOverlay:
     def _fire_mode_click(self) -> None:
         if self._on_mode_click_cb:
             self._on_mode_click_cb()
+
+    def set_annotate_click_handler(self, cb: Callable[[], None]) -> None:
+        """Was der Stift am Chip macht — vom App-Controller gesetzt."""
+        self._on_annotate_click_cb = cb
+
+    def _fire_annotate_click(self) -> None:
+        if self._on_annotate_click_cb:
+            self._on_annotate_click_cb()
 
     def set_quit_handler(self, cb: Callable[[], None]) -> None:
         """Vom CLI gesetzt: was passiert wenn das Control-Fenster geschlossen wird."""
@@ -764,7 +814,10 @@ class RecordingOverlay:
             try:
                 from voice_flow.mode_chip import build_mode_chip_class
 
-                self._chip = build_mode_chip_class()(on_click=self._fire_mode_click)
+                self._chip = build_mode_chip_class()(
+                    on_click=self._fire_mode_click,
+                    on_annotate=self._fire_annotate_click,
+                )
                 self._widget._chip = self._chip
                 screen = QApplication.primaryScreen().availableGeometry()
                 # Zone, in der die Pille im Aufnahme-Zustand erscheint — daran

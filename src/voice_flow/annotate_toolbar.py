@@ -1,91 +1,123 @@
-"""Reine Geometrie + Hit-Test der vertikalen Loom-Werkzeugleiste.
+"""Geometrie + Hit-Test der Zeichen-Leiste, gebaut wie Lovables Annotation-Leiste.
 
-Bewusst OHNE Qt: die Toolbar ist Layout (Buttons untereinander) + Klassifikation
-(welcher Button wurde getroffen). Das ist pure Logik und damit unit-getestet, der
-Qt-Layer in annotate.py malt die Items nur noch und liest die State-Aenderung ab.
-So bleibt annotate.py klein und das Hit-Testing deterministisch pruefbar.
+18.08 Bastian: "die UI UX muss 1:1 wie bei Lovable sein". Lovables Leiste ist
+bewusst karg: ein Stift-Knopf mit dem Wort "Annotation", dann Zurueck, Vor und
+"Clear" — mehr nicht. Keine Werkzeug-Palette, keine Farbwahl (rot ist gesetzt),
+und die drei rechten Knoepfe sind ausgegraut, solange nichts gezeichnet ist.
+Die Formen entstehen nicht durch Werkzeugwahl, sondern beim Loslassen
+(shape_snap) — genau das ist Lovables Trick.
+
+Voice Flow braucht zwei Knoepfe mehr als Lovable, weil es kein Browser-Tab ist:
+Aufnehmen (Screenshot mit den Markierungen) und Schliessen. Die sitzen abgesetzt
+rechts, im selben Stil.
+
+Bewusst OHNE Qt: Layout und Treffer-Erkennung sind reine Logik und damit
+unit-getestet; annotate.py malt nur noch.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-# 27.06 Bastian: galvanek-orange + Loom-Klassiker rot/gelb/weiss. Reihenfolge =
-# Mal-Reihenfolge in der Pille. RGB-Tupel, direkt von Pillow + Qt nutzbar.
-PALETTE: list[tuple[int, int, int]] = [
-    (240, 115, 32),   # galvanek-orange (Default)
-    (255, 69, 58),    # rot
-    (255, 214, 64),   # gelb
-    (245, 245, 248),  # weiss
-]
+# Lovable zeichnet in Rot. Eine Farbe, keine Auswahl.
+STROKE_COLOR: tuple[int, int, int] = (255, 69, 58)
 
-TOOLBAR_W = 52          # Pillen-Breite
-_BTN = 38               # Button-Kantenlaenge
-_GAP = 8                # vertikaler Abstand zwischen Buttons
-_SEP = 14               # groesserer Abstand vor einer Gruppen-Trennung
-_MARGIN_X = 18          # Abstand der Pille vom linken Bildschirmrand
-_PAD_Y = 12             # Innen-Polster oben/unten in der Pille
+BAR_HEIGHT = 44          # Hoehe der dunklen Leiste
+BTN_H = 32               # Hoehe eines Knopfes
+ICON_W = 36              # Breite eines reinen Icon-Knopfes
+PAD_X = 10               # Innen-Polster links/rechts in der Leiste
+GAP = 4                  # Abstand zwischen Knoepfen
+SEP_GAP = 14             # Abstand an einer Gruppengrenze
+LABEL_PAD = 14           # Polster links/rechts um eine Beschriftung
+BOTTOM_OFFSET = 96       # Abstand der Leisten-Unterkante vom Bildschirmrand
+CHAR_W = 7.2             # grobe Zeichenbreite fuer die Breitenrechnung
 
 
 @dataclass(frozen=True)
 class ToolbarItem:
-    """Ein Button: kind in {tool,color,action}, value = konkrete Wahl."""
+    """Ein Knopf. kind in {tool, action}, value = konkrete Wahl."""
     kind: str
     value: object
     x: int
     y: int
-    size: int
+    width: int
+    height: int
+    label: str | None = None
+    icon: str | None = None          # Glyph-Name fuers Malen
+    needs_strokes: bool = False      # ausgegraut, solange nichts gezeichnet ist
+    separator_before: bool = False
+
+    @property
+    def size(self) -> int:
+        """Kantenlaenge fuer quadratische Knoepfe (Icon-Zeichnung)."""
+        return self.height
 
 
-# (kind, value, separator-davor?) — Reihenfolge von oben nach unten.
-_SPEC: list[tuple[str, object, bool]] = [
-    ("tool", "pen", False),
-    ("tool", "arrow", False),
-    ("tool", "rect", False),
+# Reihenfolge wie bei Lovable, danach die zwei Voice-Flow-eigenen Knoepfe.
+_SPEC: list[dict] = [
+    {"kind": "tool", "value": "pen", "label": "Annotation", "icon": "pen"},
+    {"kind": "action", "value": "undo", "icon": "undo", "needs_strokes": True,
+     "separator_before": True},
+    {"kind": "action", "value": "redo", "icon": "redo", "needs_strokes": True},
+    {"kind": "action", "value": "clear", "label": "Clear", "needs_strokes": True},
+    {"kind": "action", "value": "shoot", "icon": "shoot", "separator_before": True},
+    {"kind": "action", "value": "cancel", "icon": "cancel"},
 ]
-_SPEC += [("color", i, i == 0) for i in range(len(PALETTE))]
-_SPEC += [
-    ("action", "undo", True),
-    ("action", "redo", False),
-    ("action", "clear", False),
-    ("action", "shoot", True),
-    ("action", "cancel", False),
-]
 
 
-def build_toolbar(viewport_h: int) -> list[ToolbarItem]:
-    """Vertikal zentrierte Liste von Buttons fuer eine Viewport-Hoehe.
+def _item_width(spec: dict) -> int:
+    label = spec.get("label")
+    if not label:
+        return ICON_W
+    breite = int(len(label) * CHAR_W) + LABEL_PAD * 2
+    if spec.get("icon"):
+        breite += 20
+    return breite
 
-    Hoehe der Pille aus den Buttons + Separatoren berechnen, dann mittig
-    platzieren, dann jedem Button sein y geben. x ist fuer alle gleich (linke
-    Pille). Reine Funktion, kein Qt.
-    """
-    n = len(_SPEC)
-    sep_count = sum(1 for _, _, sep in _SPEC if sep)
-    content_h = n * _BTN + (n - 1) * _GAP + sep_count * (_SEP - _GAP)
-    start_y = max(_PAD_Y, (viewport_h - content_h) // 2)
 
-    x = _MARGIN_X + (TOOLBAR_W - _BTN) // 2
+def build_toolbar(viewport_w: int, viewport_h: int,
+                  bottom_offset: int = BOTTOM_OFFSET) -> list[ToolbarItem]:
+    """Knoepfe nebeneinander, unten mittig — dort, wo auch die Pille sitzt."""
+    breiten = [_item_width(spec) for spec in _SPEC]
+    gesamt = sum(breiten)
+    for i, spec in enumerate(_SPEC):
+        if i > 0:
+            gesamt += SEP_GAP if spec.get("separator_before") else GAP
+    start_x = max(PAD_X, (viewport_w - gesamt) // 2)
+    y = max(PAD_X, viewport_h - bottom_offset - BTN_H)
+
     items: list[ToolbarItem] = []
-    y = start_y
-    for idx, (kind, value, sep) in enumerate(_SPEC):
-        if idx > 0:
-            y += (_SEP if sep else _GAP)
-        items.append(ToolbarItem(kind=kind, value=value, x=x, y=y, size=_BTN))
-        y += _BTN
+    x = start_x
+    for i, spec in enumerate(_SPEC):
+        if i > 0:
+            x += SEP_GAP if spec.get("separator_before") else GAP
+        items.append(ToolbarItem(
+            kind=spec["kind"], value=spec["value"], x=x, y=y,
+            width=breiten[i], height=BTN_H,
+            label=spec.get("label"), icon=spec.get("icon"),
+            needs_strokes=bool(spec.get("needs_strokes")),
+            separator_before=bool(spec.get("separator_before")),
+        ))
+        x += breiten[i]
     return items
 
 
 def pill_rect(items: list[ToolbarItem]) -> tuple[int, int, int, int]:
-    """(left, top, width, height) der dunklen Pille hinter den Buttons."""
-    top = min(it.y for it in items) - _PAD_Y
-    bottom = max(it.y + it.size for it in items) + _PAD_Y
-    return (_MARGIN_X, top, TOOLBAR_W, bottom - top)
+    """(left, top, width, height) der dunklen Leiste hinter den Knoepfen."""
+    left = min(it.x for it in items) - PAD_X
+    right = max(it.x + it.width for it in items) + PAD_X
+    top = min(it.y for it in items) - (BAR_HEIGHT - BTN_H) // 2
+    return (left, top, right - left, BAR_HEIGHT)
 
 
 def hit_test(point: tuple[int, int], items: list[ToolbarItem]) -> ToolbarItem | None:
-    """Welcher Button enthaelt den Klick? None = ausserhalb (also: zeichnen)."""
+    """Welcher Knopf liegt unter dem Punkt? None = daneben (also: zeichnen)."""
     px, py = point
     for it in items:
-        if it.x <= px < it.x + it.size and it.y <= py < it.y + it.size:
+        if it.x <= px <= it.x + it.width and it.y <= py <= it.y + it.height:
             return it
     return None
+
+
+def is_enabled(item: ToolbarItem, hat_striche: bool) -> bool:
+    """Zurueck, Vor und Clear sind tot, solange nichts gezeichnet ist."""
+    return hat_striche or not item.needs_strokes

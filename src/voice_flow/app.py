@@ -102,6 +102,7 @@ class VoiceFlowApp:
                     # Modus-Chip an der Pille: Klick schaltet um, Label zeigt
                     # sofort, wohin das naechste Diktat geht.
                     self.overlay.set_mode_click_handler(self.cycle_paste_mode)
+                    self.overlay.set_annotate_click_handler(self.on_annotate_hotkey)
                     self._refresh_mode_chip()
             except Exception as ex:
                 log.warning("Overlay-Init fehlgeschlagen: %s", ex)

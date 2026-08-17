@@ -1,65 +1,85 @@
+"""Zeichen-Leiste im Lovable-Stil: Layout, Treffer, Aktiv-/Aus-Zustand.
+
+18.08 Bastian: "1:1 wie bei Lovable". Also genau die Knoepfe, die Lovable hat
+(Annotation, Zurueck, Vor, Clear) plus die zwei, die Voice Flow braucht
+(Aufnehmen, Schliessen) — und keine Werkzeug- oder Farbpalette mehr.
+"""
+from __future__ import annotations
+
 from voice_flow.annotate_toolbar import (
-    PALETTE,
-    TOOLBAR_W,
+    BAR_HEIGHT,
+    STROKE_COLOR,
     ToolbarItem,
     build_toolbar,
     hit_test,
+    is_enabled,
+    pill_rect,
 )
 
 
-def _layout(h=1080):
-    return build_toolbar(viewport_h=h)
+def _layout(w=1470, h=956):
+    return build_toolbar(viewport_w=w, viewport_h=h)
 
 
-def test_toolbar_has_all_actions():
+def test_leiste_hat_genau_die_lovable_knoepfe():
     items = _layout()
-    kinds = {it.kind for it in items}
-    # Tools + Farben + Aktionen
-    assert {"tool", "color", "action"} <= kinds
-    tools = {it.value for it in items if it.kind == "tool"}
-    assert tools == {"pen", "arrow", "rect"}
-    actions = {it.value for it in items if it.kind == "action"}
-    assert {"undo", "clear", "shoot", "cancel"} <= actions
+    werte = [it.value for it in items]
+    assert werte == ["pen", "undo", "redo", "clear", "shoot", "cancel"]
+    # Keine Farbwahl mehr — Lovable zeichnet immer rot.
+    assert not any(it.kind == "color" for it in items)
+    assert STROKE_COLOR == (255, 69, 58)
 
 
-def test_toolbar_color_count_matches_palette():
+def test_beschriftungen_wie_bei_lovable():
+    items = {it.value: it for it in _layout()}
+    assert items["pen"].label == "Annotation"
+    assert items["clear"].label == "Clear"
+    assert items["undo"].label is None       # nur Pfeil-Symbol
+    assert items["redo"].label is None
+
+
+def test_beschriftete_knoepfe_sind_breiter_als_symbol_knoepfe():
+    items = {it.value: it for it in _layout()}
+    assert items["pen"].width > items["undo"].width
+    assert items["clear"].width > items["cancel"].width
+
+
+def test_zurueck_vor_und_clear_sind_tot_ohne_striche():
+    items = {it.value: it for it in _layout()}
+    for wert in ("undo", "redo", "clear"):
+        assert is_enabled(items[wert], hat_striche=False) is False
+        assert is_enabled(items[wert], hat_striche=True) is True
+    # Stift, Aufnehmen und Schliessen gehen immer.
+    for wert in ("pen", "shoot", "cancel"):
+        assert is_enabled(items[wert], hat_striche=False) is True
+
+
+def test_leiste_liegt_unten_mittig_und_ueber_der_pille():
     items = _layout()
-    colors = [it for it in items if it.kind == "color"]
-    assert len(colors) == len(PALETTE)
+    assert len({it.y for it in items}) == 1, "alle Knoepfe auf einer Hoehe"
+    left, top, width, height = pill_rect(items)
+    assert abs((left + width / 2) - 735) < 2, "nicht mittig"
+    assert height == BAR_HEIGHT
+    assert 956 - (top + height) > 60, "muss ueber der Aufnahme-Pille bleiben"
 
 
-def test_items_are_vertically_stacked_non_overlapping():
+def test_treffer_auf_knopf_und_daneben():
     items = _layout()
-    ys = [(it.y, it.y + it.size) for it in items]
-    ys.sort()
-    for (top, bottom), (ntop, _nb) in zip(ys, ys[1:]):
-        assert bottom <= ntop  # keine Ueberlappung
+    stift = items[0]
+    assert hit_test((stift.x + 5, stift.y + 5), items) is stift
+    assert hit_test((stift.x + stift.width // 2, stift.y + stift.height // 2), items) is stift
+    # Weit oben im Bild = kein Knopf, dort wird gezeichnet.
+    assert hit_test((700, 100), items) is None
 
 
-def test_toolbar_is_vertically_centered_region():
-    items = _layout(h=1000)
-    top = min(it.y for it in items)
-    bottom = max(it.y + it.size for it in items)
-    center = (top + bottom) / 2
-    # grob in der Bildschirmmitte (Toleranz 1px Rundung)
-    assert abs(center - 500) <= 2
-
-
-def test_hit_test_finds_item_inside_button():
+def test_knoepfe_ueberlappen_sich_nicht():
     items = _layout()
-    target = items[3]
-    cx = target.x + target.size // 2
-    cy = target.y + target.size // 2
-    hit = hit_test((cx, cy), items)
-    assert hit is target
+    for a, b in zip(items, items[1:]):
+        assert b.x >= a.x + a.width
 
 
-def test_hit_test_outside_toolbar_returns_none():
-    items = _layout()
-    assert hit_test((TOOLBAR_W + 500, 500), items) is None
-
-
-def test_toolbar_item_is_immutable_dataclass_like():
-    it = ToolbarItem(kind="tool", value="pen", x=1, y=2, size=40)
-    assert it.kind == "tool" and it.value == "pen"
-    assert it.x == 1 and it.y == 2 and it.size == 40
+def test_schmaler_bildschirm_laesst_die_leiste_im_bild():
+    items = build_toolbar(viewport_w=900, viewport_h=600)
+    left, top, width, height = pill_rect(items)
+    assert left >= 0 and top >= 0
+    assert isinstance(items[0], ToolbarItem)

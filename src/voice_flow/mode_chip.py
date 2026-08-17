@@ -37,6 +37,8 @@ CHIP_MIN_WIDTH = 92
 HOVER_POLL_MS = 220
 HOVER_MARGIN = 34         # wie weit um die Pille herum der Hover schon zaehlt
 CLICK_DEBOUNCE_SEC = 0.4  # doppelt zugestellte Klicks zusammenfassen
+# Rechts am Chip sitzt der Stift: klappt die Zeichenleiste auf (statt F6).
+PEN_ZONE_W = 34
 
 
 def geometry_beside(pill_rect: tuple[int, int, int, int], chip_width: int,
@@ -57,8 +59,9 @@ def geometry_beside(pill_rect: tuple[int, int, int, int], chip_width: int,
 
 def build_mode_chip_class():
     from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal, pyqtSlot
+    from PyQt6.QtCore import QPointF
     from PyQt6.QtGui import (QColor, QCursor, QFont, QFontMetrics, QPainter,
-                             QPainterPath, QPixmap)
+                             QPainterPath, QPen, QPixmap)
     from PyQt6.QtWidgets import QWidget
 
     from voice_flow.theme import SURFACE_BASE, SURFACE_BORDER, TEXT_SECONDARY
@@ -67,9 +70,10 @@ def build_mode_chip_class():
         sig_set_mode = pyqtSignal(str)          # Modus ("claude_code" | "ai_web")
         sig_place = pyqtSignal(object)          # pill_rect oder None (= verstecken)
 
-        def __init__(self, on_click=None):
+        def __init__(self, on_click=None, on_annotate=None):
             super().__init__()
             self._on_click = on_click
+            self._on_annotate = on_annotate
             self._label = ""
             self._mode = ""
             self._icon: QPixmap | None = None
@@ -116,7 +120,7 @@ def build_mode_chip_class():
             icon_breite = self._icon.width() if self._icon else 0
             width = max(CHIP_MIN_WIDTH,
                         CHIP_PADDING_X * 2 + icon_breite + CHIP_ICON_GAP
-                        + self._metrics.horizontalAdvance(self._label))
+                        + self._metrics.horizontalAdvance(self._label)) + PEN_ZONE_W
             self.resize(width, CHIP_HEIGHT)
             if self._pill_rect:
                 self._move_beside(self._pill_rect)
@@ -202,10 +206,14 @@ def build_mode_chip_class():
                 event.accept()
                 return
             self._last_click = now
+            # Rechte Zone = Stift (Zeichenleiste), Rest = Modus umschalten.
+            auf_stift = event.position().x() >= self.width() - PEN_ZONE_W
+            handler = self._on_annotate if auf_stift else self._on_click
             try:
-                self._on_click()
+                if handler is not None:
+                    handler()
             except Exception as ex:
-                log.warning("Modus-Chip-Klick-Handler-Fehler: %s", ex)
+                log.warning("Chip-Klick-Handler-Fehler: %s", ex)
             event.accept()
 
         # ── Malen ────────────────────────────────────────────────────
@@ -227,10 +235,24 @@ def build_mode_chip_class():
             painter.setFont(self._font)
             painter.setPen(QColor(TEXT_SECONDARY))
             painter.drawText(
-                QRectF(x, 0, self.width() - x - CHIP_PADDING_X, self.height()),
+                QRectF(x, 0, self.width() - x - PEN_ZONE_W - CHIP_PADDING_X, self.height()),
                 int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
                 self._label,
             )
+
+            # Stift-Zone rechts: Trennstrich + Stift-Glyph.
+            zone_x = self.width() - PEN_ZONE_W
+            painter.setPen(QPen(QColor(SURFACE_BORDER), 1))
+            painter.drawLine(int(zone_x), 8, int(zone_x), self.height() - 8)
+            self._paint_pen_glyph(painter, zone_x + PEN_ZONE_W / 2, self.height() / 2)
             painter.end()
+
+        def _paint_pen_glyph(self, painter, cx: float, cy: float) -> None:
+            """Kleiner Stift — dasselbe Zeichen, das Lovable fuer Annotation nutzt."""
+            painter.setPen(QPen(QColor(TEXT_SECONDARY), 1.6))
+            painter.drawLine(QPointF(cx - 5, cy + 5), QPointF(cx + 4, cy - 4))
+            painter.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx + 6, cy - 2))
+            painter.drawLine(QPointF(cx + 6, cy - 2), QPointF(cx - 3, cy + 7))
+            painter.drawLine(QPointF(cx - 3, cy + 7), QPointF(cx - 6, cy + 7))
 
     return ModeChipWidget
