@@ -88,3 +88,18 @@ def test_winzige_zuege_bleiben_freihand():
     zug = [(10.0, 10.0), (12.0, 11.0), (13.0, 12.0), (12.0, 13.0), (10.0, 12.0), (10.0, 10.0)]
     assert snap(zug)[0] == "pen"
     assert snap([(1.0, 1.0), (2.0, 2.0)])[0] == "pen"   # zu wenige Punkte
+
+
+def test_kreise_bleiben_kreise_ueber_groessen_und_zittern():
+    """Regressionsschutz: mit der alten Schwelle wurde ein zittriger Kreis zum
+    Rechteck (aufgefallen beim Rendern des Beweisbildes, nicht im Test)."""
+    for r in (40, 70, 80, 120):
+        for rauschen in (2, 6, 10):
+            form, _ = snap(_kreis(cx=200, cy=200, r=float(r), rauschen=float(rauschen)))
+            assert form == "ellipse", f"r={r} rauschen={rauschen} wurde {form}"
+
+
+def test_rechtecke_bleiben_rechtecke_auch_krumm():
+    for rauschen in (2, 4, 8, 12):
+        form, _ = snap(_rechteck(rauschen=float(rauschen)))
+        assert form == "rect", f"rauschen={rauschen} wurde {form}"

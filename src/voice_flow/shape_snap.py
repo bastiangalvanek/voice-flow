@@ -21,7 +21,13 @@ CLOSED_MAX_GAP = 0.30
 # Wie stark duerfen die Punkte vom idealen Ellipsenrand abweichen (Anteil).
 ELLIPSE_TOLERANCE = 0.22
 # Wie nah muessen die Punkte am Rand der Box liegen, damit es ein Rechteck ist.
-RECT_TOLERANCE = 0.08
+# GEMESSEN 18.08. ueber 12 Kreis- und 4 Rechteck-Varianten: Rechtecke landen bei
+# 0.007 bis 0.036, Kreise nie unter 0.037. Zusaetzlich muss der Rechteck-Fehler
+# klar kleiner sein als der Ellipsen-Fehler (Rechtecke: Faktor 0.05 bis 0.30,
+# Kreise: nie unter 0.53) — mit nur einer der beiden Regeln wurde ein zittriger
+# Kreis zum Rechteck.
+RECT_TOLERANCE = 0.037
+RECT_MUST_BEAT_ELLIPSE = 0.5
 # Wie gerade muss ein Zug sein, damit er als Linie gilt: Weglaenge zu
 # Luftlinie. 1.0 = perfekt gerade.
 LINE_MAX_DETOUR = 1.12
@@ -141,15 +147,13 @@ def snap(points: list[Point]) -> tuple[str, list[Point]]:
     geschlossen = _is_closed(points, diagonale)
 
     if geschlossen:
-        # Rund oder eckig? Beide Formen an derselben Box messen und die mit dem
-        # kleineren Fehler gewinnen lassen. GEMESSEN 18.08. an Testzuegen:
-        # Kritzelkreis 0.050 (Ellipse) zu 0.051 (Rechteck), krummes Viereck
-        # 0.119 zu 0.025 — die Reihenfolge allein wuerde Rechtecke zu Kreisen
-        # machen, der Vergleich trennt sie.
+        # Rund oder eckig? Beide Formen an derselben Box messen (siehe die
+        # Schwellen oben, die aus einer Messreihe stammen).
         ellipse_fehler = _ellipse_error(points, box)
         rechteck_fehler = _rect_error(points, box, diagonale)
-        if rechteck_fehler < ellipse_fehler and rechteck_fehler <= RECT_TOLERANCE \
-                and min(breite, hoehe) > MIN_SIZE:
+        if (rechteck_fehler <= RECT_TOLERANCE
+                and rechteck_fehler < ellipse_fehler * RECT_MUST_BEAT_ELLIPSE
+                and min(breite, hoehe) > MIN_SIZE):
             return ("rect", [(box[0], box[1]), (box[2], box[3])])
         if ellipse_fehler <= ELLIPSE_TOLERANCE:
             return ("ellipse", [(box[0], box[1]), (box[2], box[3])])
