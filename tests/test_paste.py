@@ -23,6 +23,12 @@ def fake_clipboard(monkeypatch):
     fake_keyboard = types.ModuleType("keyboard")
     fake_keyboard.send = MagicMock()
     monkeypatch.setitem(sys.modules, "keyboard", fake_keyboard)
+    # Auf macOS holt paste.py seine Tastatur aus voice_flow._keyboard_mac
+    # (die Bibliothek `keyboard` bringt dort schon beim Import den Prozess um).
+    # Ohne diesen zweiten Eintrag greift der Mock nur unter Windows.
+    monkeypatch.setitem(sys.modules, "voice_flow._keyboard_mac", fake_keyboard)
+    import voice_flow
+    monkeypatch.setattr(voice_flow, "_keyboard_mac", fake_keyboard, raising=False)
 
     # Force fresh import so the mocks are picked up by paste.py
     sys.modules.pop("voice_flow.paste", None)

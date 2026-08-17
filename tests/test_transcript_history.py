@@ -39,14 +39,14 @@ def test_append_writes_human_readable_txt(isolated_history):
     th.append_transcript(text="quick check", duration_sec=0.8, word_count=2)
     txt = th.TXT_FILE.read_text(encoding="utf-8")
     assert "quick check" in txt
-    assert "2 words" in txt
+    assert "2 Woerter" in txt   # 18.08: Ausgabe ist deutsch, nicht englisch
     assert "==========" in txt  # day header
 
 
 def test_append_pluralizes_word_singular(isolated_history):
     th.append_transcript(text="hi", word_count=1)
     txt = th.TXT_FILE.read_text(encoding="utf-8")
-    assert "1 word" in txt
+    assert "1 Wort" in txt      # 18.08: Ausgabe ist deutsch, nicht englisch
     assert "1 words" not in txt
 
 
