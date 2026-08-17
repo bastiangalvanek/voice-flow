@@ -20,6 +20,7 @@ from collections.abc import Callable
 
 from PIL import Image, ImageDraw
 
+from voice_flow.shape_snap import snap
 from voice_flow.annotate_toolbar import (
     PALETTE,
     ToolbarItem,
@@ -100,6 +101,12 @@ def composite_strokes(img: Image.Image, strokes: list,
             (x0, y0), (x1, y1) = pts[0], pts[-1]
             box = [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
             draw.rectangle(box, outline=color, width=width)
+        elif kind == "ellipse":
+            (x0, y0), (x1, y1) = pts[0], pts[-1]
+            box = [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
+            draw.ellipse(box, outline=color, width=width)
+        elif kind == "line":
+            draw.line([pts[0], pts[-1]], fill=color, width=width)
     return out
 
 
@@ -136,6 +143,8 @@ def build_annotate_class():
             self._on_shoot = on_shoot
             self._on_close = on_close
             self._strokes: list[dict] = []
+            # Zurueckgenommene Striche fuer "vor" (Lovable hat Undo UND Redo).
+            self._redo_stack: list[dict] = []
             self._current: dict | None = None
             self._tool = "pen"
             self._color_idx = 0
@@ -215,7 +224,18 @@ def build_annotate_class():
 
         def mouseReleaseEvent(self, e):
             if self._current is not None and len(self._current["points"]) >= 1:
+                # 18.08 Bastian (nach Lovable): "lass los und dann wird es so ein
+                # Kreis. Oder ein Pfeil." Nur beim Freihand-Werkzeug — wer
+                # bewusst Pfeil oder Rechteck gewaehlt hat, will keine Umdeutung.
+                if self._current["type"] == "pen":
+                    form, punkte = snap([(float(x), float(y))
+                                         for x, y in self._current["points"]])
+                    if form != "pen":
+                        self._current["type"] = form
+                        self._current["points"] = [(int(x), int(y)) for x, y in punkte]
+                        log.debug("Form erkannt: %s", form)
                 self._strokes.append(self._current)
+                self._redo_stack.clear()   # neuer Strich = Vorwaerts-Weg endet
             self._current = None
             self._reset_fade()  # mehr zeichnen = laenger sichtbar
             self.update()
@@ -232,9 +252,14 @@ def build_annotate_class():
         def _do_action(self, action: str) -> None:
             if action == "undo":
                 if self._strokes:
-                    self._strokes.pop()
+                    self._redo_stack.append(self._strokes.pop())
+                self._reset_fade()
+            elif action == "redo":
+                if self._redo_stack:
+                    self._strokes.append(self._redo_stack.pop())
                 self._reset_fade()
             elif action == "clear":
+                self._redo_stack.extend(reversed(self._strokes))
                 self._strokes.clear()
                 self._reset_fade()
             elif action == "shoot":
@@ -253,9 +278,9 @@ def build_annotate_class():
             elif key == Qt.Key.Key_Escape:
                 self.close()
             elif key == Qt.Key.Key_Z and (e.modifiers() & Qt.KeyboardModifier.ControlModifier):
-                if self._strokes:
-                    self._strokes.pop()
-                self._reset_fade()
+                # Mit Shift = vor (wie ueberall), ohne = zurueck.
+                self._do_action("redo" if (e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                                else "undo")
                 self.update()
 
         # ---- Shoot: grabben + Striche einbrennen ----
@@ -328,6 +353,12 @@ def build_annotate_class():
                     (x0, y0), (x1, y1) = pts[0], pts[-1]
                     p.drawRect(int(min(x0, x1)), int(min(y0, y1)),
                                int(abs(x1 - x0)), int(abs(y1 - y0)))
+                elif kind == "ellipse":
+                    (x0, y0), (x1, y1) = pts[0], pts[-1]
+                    p.drawEllipse(int(min(x0, x1)), int(min(y0, y1)),
+                                  int(abs(x1 - x0)), int(abs(y1 - y0)))
+                elif kind == "line":
+                    p.drawLine(QPointF(*pts[0]), QPointF(*pts[-1]))
 
         def _paint_arrow(self, p, p0, p1, col, width):
             p.drawLine(QPointF(*p0), QPointF(*p1))

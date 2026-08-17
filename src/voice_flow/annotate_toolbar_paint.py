@@ -79,6 +79,11 @@ def _paint_action_glyph(p, action: str, cx: float, cy: float, qt) -> None:
         p.drawArc(QRectF(cx - 8, cy - 8, 16, 16), 40 * 16, 250 * 16)
         p.drawLine(QPointF(cx - 8, cy - 4), QPointF(cx - 8, cy - 9))
         p.drawLine(QPointF(cx - 8, cy - 9), QPointF(cx - 3, cy - 9))
+    elif action == "redo":
+        # Gespiegelter Undo-Bogen: Pfeil zeigt nach rechts.
+        p.drawArc(QRectF(cx - 8, cy - 8, 16, 16), 290 * 16, 250 * 16)
+        p.drawLine(QPointF(cx + 8, cy - 4), QPointF(cx + 8, cy - 9))
+        p.drawLine(QPointF(cx + 8, cy - 9), QPointF(cx + 3, cy - 9))
     elif action == "clear":
         # Muelltonne (klar von cancel-X unterscheidbar): Deckel + Korpus + Streben.
         p.drawLine(QPointF(cx - 8, cy - 6), QPointF(cx + 8, cy - 6))   # Deckel-Linie

@@ -45,6 +45,7 @@ _SPEC: list[tuple[str, object, bool]] = [
 _SPEC += [("color", i, i == 0) for i in range(len(PALETTE))]
 _SPEC += [
     ("action", "undo", True),
+    ("action", "redo", False),
     ("action", "clear", False),
     ("action", "shoot", True),
     ("action", "cancel", False),
