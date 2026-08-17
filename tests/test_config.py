@@ -13,6 +13,9 @@ def test_missing_openai_key_raises(monkeypatch, tmp_path):
     # Verhindere .env-Loading indem wir cwd auf leeres Verzeichnis setzen
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("voice_flow.config.ENV_FILE", tmp_path / ".env-does-not-exist")
+    # Seit 18.08 sucht die App die .env auch im Benutzerordner (die gebuendelte
+    # App hat kein Repo-Verzeichnis) — fuer diesen Fall muessen BEIDE Quellen weg.
+    monkeypatch.setattr("voice_flow.config.USER_ENV_FILE", tmp_path / ".env-user-does-not-exist")
     with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
         load_config()
 
@@ -21,6 +24,9 @@ def test_load_config_with_key(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-123")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr("voice_flow.config.ENV_FILE", tmp_path / ".env-does-not-exist")
+    # Seit 18.08 sucht die App die .env auch im Benutzerordner (die gebuendelte
+    # App hat kein Repo-Verzeichnis) — fuer diesen Fall muessen BEIDE Quellen weg.
+    monkeypatch.setattr("voice_flow.config.USER_ENV_FILE", tmp_path / ".env-user-does-not-exist")
     monkeypatch.setattr("voice_flow.config.CONTEXT_FILE", tmp_path / "no-context.txt")
 
     cfg = load_config()

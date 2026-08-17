@@ -103,15 +103,27 @@ def test_e2e_berechtigungsmodul_stuerzt_nicht_ab():
 
 
 @pytest.mark.skipif(not MAC, reason="macOS-E2E")
-def test_e2e_app_bundle_verweist_auf_echten_code():
+def test_e2e_app_bundle_ist_eigenstaendig():
+    """Die installierte App muss OHNE Repo und venv laufen koennen.
+
+    18.08 Bastian: "damit es nicht im AppleScript/Python laeuft, sondern meiner
+    App". Vorher war der Launcher ein Shell-Skript, das die venv im Repo startete
+    — verschiebt man das Repo, war die App tot. Jetzt: eigenes Programm im
+    Bundle, Python und Qt liegen mit drin, und die Modus-Zeichen ebenso.
+    """
     for bundle in (Path("/Applications/Voice Flow.app"),
                    Path.home() / "Applications" / "Voice Flow.app"):
-        if bundle.exists():
-            exe = bundle / "Contents" / "MacOS" / "voice-flow"
-            assert exe.exists(), f"{bundle}: kein Launcher"
-            inhalt = exe.read_text(encoding="utf-8", errors="replace")
-            assert "voice_flow.cli" in inhalt and "claudecode/apps/tools/voice-flow" in inhalt, (
-                f"{bundle}: Launcher zeigt nicht auf dieses Projekt"
-            )
-            return
+        if not bundle.exists():
+            continue
+        exe = bundle / "Contents" / "MacOS" / "Voice Flow"
+        assert exe.exists(), f"{bundle}: kein Programm im Bundle"
+        assert os.access(exe, os.X_OK), f"{exe}: nicht ausfuehrbar"
+        kopf = exe.read_bytes()[:4]
+        assert kopf in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"), (
+            f"{exe}: kein Mach-O-Programm, sondern noch ein Skript-Starter"
+        )
+        res = bundle / "Contents" / "Resources"
+        for name in ("mode_claude_code.png", "mode_ai_web.png"):
+            assert (res / "assets" / name).exists(), f"{name} fehlt im Bundle"
+        return
     pytest.fail("Voice Flow.app weder in /Applications noch ~/Applications")

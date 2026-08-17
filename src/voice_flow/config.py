@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTEXT_FILE = PROJECT_ROOT / "galvanek_context.txt"
 ENV_FILE = PROJECT_ROOT / ".env"
+# 18.08: als gebuendelte App gibt es kein Repo-Verzeichnis mehr — dort liegt die
+# .env im Benutzerordner. Reihenfolge: Repo zuerst (Entwicklung), dann Benutzer.
+USER_ENV_FILE = Path.home() / ".voice-flow" / ".env"
 
 
 @dataclass(frozen=True)
@@ -75,8 +78,9 @@ def load_context() -> str:
 
 
 def load_config(overrides: dict | None = None) -> Config:
-    if ENV_FILE.exists():
-        load_dotenv(ENV_FILE)
+    for env_file in (ENV_FILE, USER_ENV_FILE):
+        if env_file.exists():
+            load_dotenv(env_file)
 
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
