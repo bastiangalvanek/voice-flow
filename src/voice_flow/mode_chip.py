@@ -17,6 +17,7 @@ geometry_beside() ist reine Mathematik und unit-getestet.
 from __future__ import annotations
 
 import logging
+import time
 
 from voice_flow.target_mode import MODE_AI_WEB
 
@@ -29,6 +30,7 @@ CHIP_GAP = 8            # Abstand zur Pille
 CHIP_MIN_WIDTH = 96
 HOVER_POLL_MS = 220
 HOVER_MARGIN = 34       # wie weit um die Pille herum der Hover schon zaehlt
+CLICK_DEBOUNCE_SEC = 0.4  # doppelt zugestellte Klicks zusammenfassen
 
 SURFACE = "#15151A"
 BORDER = "#2E2E38"
@@ -69,6 +71,7 @@ def build_mode_chip_class():
             self._mode = ""
             self._pill_rect: tuple | None = None
             self._pinned = False   # True = Pille ist sichtbar, Chip bleibt
+            self._last_click = 0.0
 
             self.setWindowFlags(
                 Qt.WindowType.FramelessWindowHint
@@ -163,14 +166,23 @@ def build_mode_chip_class():
                     and g.y() <= y <= g.y() + g.height())
 
         # ── Klick ────────────────────────────────────────────────────
-        # Kein AppKit-Kunstgriff noetig: Qt.Tool + WA_ShowWithoutActivating
-        # stellt den Klick auch dann zu, wenn Chrome die aktive App ist
-        # (gemessen 18.08.: 10 von 10 Klicks geschaltet, mit UND ohne
-        # NSWindow-Praeparierung — der Stil NSWindowStyleMaskNonactivatingPanel
-        # war sogar schaedlich, da fiel der Klick durch den Chip hindurch).
+        # Kein AppKit-Kunstgriff: Qt.Tool + WA_ShowWithoutActivating stellt den
+        # Klick auch dann zu, wenn eine fremde App aktiv ist. Verworfen wurde
+        # NSWindowStyleMaskNonactivatingPanel — damit fiel der Klick DURCH den
+        # Chip in die App darunter (gemessen 18.08.).
         def mousePressEvent(self, event) -> None:
             if event.button() != Qt.MouseButton.LeftButton or self._on_click is None:
                 return
+            # Entprellung: macOS stellt EINEN Klick auf ein Fenster einer
+            # inaktiven App manchmal zweimal zu (gemessen 18.08.: aus 5 Klicks
+            # wurden 6 Schaltvorgaenge, einer sprang zwei Stufen weiter).
+            # Schneller als CLICK_DEBOUNCE_SEC kann niemand bewusst umschalten.
+            now = time.monotonic()
+            if now - self._last_click < CLICK_DEBOUNCE_SEC:
+                log.debug("Chip-Klick verworfen (Entprellung).")
+                event.accept()
+                return
+            self._last_click = now
             try:
                 self._on_click()
             except Exception as ex:

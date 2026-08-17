@@ -161,13 +161,26 @@ class VoiceFlowApp:
         label = target_mode.chip_label(new_setting, self._target_bundle_id)
         log.info("MODUS  %s (Einstellung=%s)", label, new_setting)
         self._refresh_mode_chip()
-        # Klick auf ein Fenster von Voice Flow kann den Fokus geklaut haben —
-        # die Ziel-App muss vorne sein, sonst landet das Einfuegen bei uns.
-        # NUR waehrend eines laufenden Zyklus: im Ruhezustand waere die gemerkte
-        # Ziel-App veraltet und wir wuerden ein fremdes Fenster nach vorne reissen.
-        if self.state in (self.STATE_RECORDING, self.STATE_PROCESSING):
-            target_mode.activate_bundle_id(self._target_bundle_id)
+        # Bewusst KEINE Fokus-Rueckgabe hier: gemessen 18.08. sprang der Fokus
+        # dann bei jedem Klick zwischen Chip und Ziel-App hin und her, wodurch
+        # der naechste Klick mal doppelt ankam und mal geschluckt wurde
+        # (2 von 5). Der Fokus wird stattdessen EINMAL direkt vor dem Einfuegen
+        # geradegezogen (_ensure_target_frontmost) — dort zaehlt er wirklich.
         return new_setting
+
+    def _ensure_target_frontmost(self) -> None:
+        """Vor dem Einfuegen sicherstellen, dass die Ziel-App vorne ist.
+
+        Ein Klick auf den Modus-Chip holt Voice Flow nach vorne. Ohne diese
+        Korrektur wuerde das Diktat in unser eigenes Fenster gehen.
+        """
+        if not self._target_bundle_id:
+            return
+        if target_mode.frontmost_bundle_id() != target_mode.own_bundle_id():
+            return
+        if target_mode.activate_bundle_id(self._target_bundle_id):
+            log.info("FOKUS  Ziel-App %s zurueckgeholt.", self._target_bundle_id)
+            time.sleep(0.35)  # macOS braucht einen Moment bis das Feld wieder Fokus hat
 
     def _refresh_mode_chip(self) -> None:
         if not self.overlay:
@@ -468,6 +481,7 @@ class VoiceFlowApp:
             if caps:
                 final_text = weave_screenshot_markers(cleaned, caps, duration)
 
+            self._ensure_target_frontmost()
             paste_to_active_window(
                 final_text,
                 restore_clipboard=self.config.enable_clipboard_restore,

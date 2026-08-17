@@ -85,17 +85,27 @@ def own_bundle_id() -> str | None:
 def activate_bundle_id(bundle_id: str | None) -> bool:
     """Holt die Ziel-App wieder nach vorne (nach einem Klick auf den Modus-Chip).
 
-    Ohne das koennte das Einfuegen in Voice Flow statt in Chrome landen.
+    Ohne das landet das Einfuegen in Voice Flow statt in Chrome.
+
+    GEMESSEN 18.08.: `NSRunningApplication.activateWithOptions_` liefert hier
+    False und Chrome kam auch nach 2,1 Sekunden nicht nach vorne (macOS laesst
+    das Aktivieren fremder Apps so nicht mehr zu). `openApplicationAtURL` zieht
+    dagegen in 0,15 s — und braucht, anders als AppleScript, keine
+    Automations-Freigabe.
     """
     if not bundle_id or sys.platform != "darwin":
         return False
     try:
-        from AppKit import NSRunningApplication, NSApplicationActivateIgnoringOtherApps
+        from AppKit import NSWorkspace, NSWorkspaceOpenConfiguration
 
-        apps = NSRunningApplication.runningApplicationsWithBundleIdentifier_(bundle_id)
-        if not apps:
+        workspace = NSWorkspace.sharedWorkspace()
+        url = workspace.URLForApplicationWithBundleIdentifier_(bundle_id)
+        if url is None:
             return False
-        return bool(apps[0].activateWithOptions_(NSApplicationActivateIgnoringOtherApps))
+        workspace.openApplicationAtURL_configuration_completionHandler_(
+            url, NSWorkspaceOpenConfiguration.configuration(), None
+        )
+        return True
     except Exception as ex:  # pragma: no cover — Systemgrenze
         log.warning("Ziel-App %s nicht reaktivierbar: %s", bundle_id, ex)
         return False
