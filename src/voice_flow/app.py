@@ -163,7 +163,10 @@ class VoiceFlowApp:
         self._refresh_mode_chip()
         # Klick auf ein Fenster von Voice Flow kann den Fokus geklaut haben —
         # die Ziel-App muss vorne sein, sonst landet das Einfuegen bei uns.
-        target_mode.activate_bundle_id(self._target_bundle_id)
+        # NUR waehrend eines laufenden Zyklus: im Ruhezustand waere die gemerkte
+        # Ziel-App veraltet und wir wuerden ein fremdes Fenster nach vorne reissen.
+        if self.state in (self.STATE_RECORDING, self.STATE_PROCESSING):
+            target_mode.activate_bundle_id(self._target_bundle_id)
         return new_setting
 
     def _refresh_mode_chip(self) -> None:

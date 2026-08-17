@@ -163,6 +163,11 @@ def build_mode_chip_class():
                     and g.y() <= y <= g.y() + g.height())
 
         # ── Klick ────────────────────────────────────────────────────
+        # Kein AppKit-Kunstgriff noetig: Qt.Tool + WA_ShowWithoutActivating
+        # stellt den Klick auch dann zu, wenn Chrome die aktive App ist
+        # (gemessen 18.08.: 10 von 10 Klicks geschaltet, mit UND ohne
+        # NSWindow-Praeparierung — der Stil NSWindowStyleMaskNonactivatingPanel
+        # war sogar schaedlich, da fiel der Klick durch den Chip hindurch).
         def mousePressEvent(self, event) -> None:
             if event.button() != Qt.MouseButton.LeftButton or self._on_click is None:
                 return
