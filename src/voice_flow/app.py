@@ -10,7 +10,7 @@ from voice_flow.cleanup import Cleaner
 from voice_flow.config import Config
 from voice_flow.gui_errors import show_error
 from voice_flow.overlay import RecordingOverlay
-from voice_flow.paste import paste_to_active_window
+from voice_flow.paste import paste_files_to_active_window, paste_to_active_window
 from voice_flow.recording_storage import (
     RECORDINGS_DIR,
     archive_recording,
@@ -20,6 +20,7 @@ from voice_flow.recording_storage import (
     save_recording,
 )
 from voice_flow.settings import Settings
+from voice_flow import target_mode
 from voice_flow.sound import beep_error, beep_ready, beep_start, beep_stop
 from voice_flow.transcript_history import append_transcript
 from voice_flow.transcript_quality import is_suspect_transcription
@@ -80,6 +81,10 @@ class VoiceFlowApp:
         # den Sprech-Offset (Sekunden seit Start) festzuhalten -> proportionale
         # Screenshot-Marker im Transkript.
         self._record_start: float | None = None
+        # 18.08 Bastian: Ziel-App beim Aufnahme-Start festhalten. Zum Einfuege-
+        # Zeitpunkt kann Voice Flow selbst vorne sein (Klick auf den Modus-Chip)
+        # — dann waere die Auto-Erkennung blind. Diese ID ist der Rueckfall.
+        self._target_bundle_id: str | None = None
 
         # Floating Overlay (Wispr-Style) — laeuft in eigenem Tk-Thread
         self.overlay: RecordingOverlay | None = None
@@ -94,6 +99,10 @@ class VoiceFlowApp:
                 else:
                     self.overlay.set_level_provider(lambda: self.recorder.current_level)
                     self._populate_mic_picker()
+                    # Modus-Chip an der Pille: Klick schaltet um, Label zeigt
+                    # sofort, wohin das naechste Diktat geht.
+                    self.overlay.set_mode_click_handler(self.cycle_paste_mode)
+                    self._refresh_mode_chip()
             except Exception as ex:
                 log.warning("Overlay-Init fehlgeschlagen: %s", ex)
                 self.overlay = None
@@ -133,6 +142,42 @@ class VoiceFlowApp:
         self.settings.set_audio_device(name)
         log.info("Mikrofon gewaehlt: %s", name or "Windows-Standard")
 
+    # ---------- Ziel-Modus: Pfade (Claude Code) vs. Bilder (AI-Web) ----------
+
+    def _effective_bundle_id(self) -> str | None:
+        """Die App, in die eingefuegt wird — Voice Flow selbst zaehlt nicht."""
+        current = target_mode.frontmost_bundle_id()
+        if current and current != target_mode.own_bundle_id():
+            return current
+        return self._target_bundle_id
+
+    def resolved_paste_mode(self) -> str:
+        return target_mode.resolve_mode(self.settings.paste_mode, self._effective_bundle_id())
+
+    def cycle_paste_mode(self) -> str:
+        """Klick auf den Modus-Chip: Auto -> Claude Code -> AI-Web -> Auto."""
+        new_setting = target_mode.next_setting(self.settings.paste_mode)
+        self.settings.set_paste_mode(new_setting)
+        label = target_mode.chip_label(new_setting, self._target_bundle_id)
+        log.info("MODUS  %s (Einstellung=%s)", label, new_setting)
+        self._refresh_mode_chip()
+        # Klick auf ein Fenster von Voice Flow kann den Fokus geklaut haben —
+        # die Ziel-App muss vorne sein, sonst landet das Einfuegen bei uns.
+        target_mode.activate_bundle_id(self._target_bundle_id)
+        return new_setting
+
+    def _refresh_mode_chip(self) -> None:
+        if not self.overlay:
+            return
+        setting = self.settings.paste_mode
+        try:
+            self.overlay.set_mode_chip(
+                target_mode.chip_label(setting, self._effective_bundle_id()),
+                target_mode.resolve_mode(setting, self._effective_bundle_id()),
+            )
+        except Exception as ex:
+            log.warning("Modus-Chip nicht aktualisierbar: %s", ex)
+
     # ---------- Hotkey-Callbacks ----------
 
     def on_hotkey_press(self) -> None:
@@ -148,8 +193,12 @@ class VoiceFlowApp:
             # verliert seinen Inline-Marker.
             self._record_start = time.monotonic()
             self._tray_set("recording")
+            # 18.08: Ziel-App merken, BEVOR die Pille kommt — danach zeigt der
+            # Chip an der Pille, wohin dieses Diktat geht (Pfade oder Bilder).
+            self._target_bundle_id = target_mode.frontmost_bundle_id()
             if self.overlay:
                 self.overlay.show_recording()
+                self._refresh_mode_chip()
 
         # 27.06 Bastian: Session sicherstellen, sodass eine laufende Aufnahme
         # und F7-Screenshots in denselben Bucket schreiben.
@@ -402,12 +451,17 @@ class VoiceFlowApp:
 
             # 27.06 Bastian: Screenshot-Marker proportional zur Sprechzeit einweben.
             # captures kommen aus der Session (F7/F6 waehrend der Aufnahme).
+            # 18.08 Bastian: Marker-Form haengt am Ziel — Claude Code bekommt den
+            # Pfad, ein Web-Chat die Bildnummer (dort ist der Pfad wertlos, weil
+            # der Browser das Verzeichnis nicht hat).
+            mode = self.resolved_paste_mode()
+            shots = list(self.session.shots) if self.session is not None else []
+            shot_index = {str(p): i + 1 for i, p in enumerate(shots)}
             final_text = cleaned
             caps = []
             if self.session is not None:
-                from pathlib import Path
                 for off, p in self.session.captures:
-                    caps.append((off, f"(siehe {Path(p).name} im Bucket: {p})"))
+                    caps.append((off, target_mode.capture_marker(p, shot_index.get(p, 1), mode)))
             if caps:
                 final_text = weave_screenshot_markers(cleaned, caps, duration)
 
@@ -415,6 +469,23 @@ class VoiceFlowApp:
                 final_text,
                 restore_clipboard=self.config.enable_clipboard_restore,
             )
+
+            # AI-Web: die Bilder als DATEIEN hinterher einfuegen. Zwei Vorgaenge,
+            # weil Chrome bei gemischter Zwischenablage den Text verwirft
+            # (gemessen 18.08: text="" sobald Dateien mit drauf liegen).
+            pasted_images = 0
+            if mode == target_mode.MODE_AI_WEB and shots:
+                try:
+                    pasted_images = paste_files_to_active_window(shots)
+                    log.info("PASTE  ✓ %d Bild(er) als Dateien eingefuegt.", pasted_images)
+                except Exception as ex:
+                    log.error("Bilder-Einfuegen fehlgeschlagen: %s", ex)
+                    if self.overlay:
+                        self.overlay.show_info(
+                            f"Text ist drin, Bilder nicht ({ex}). "
+                            "Ordner ueber den Toast oeffnen und manuell ziehen.",
+                            6000,
+                        )
             total_s = time.time() - t0
             word_count = len(cleaned.split())
             log.info(
@@ -479,10 +550,14 @@ class VoiceFlowApp:
                 success_shown = True
                 # Premium Toast top-right mit Kopieren-Action (die Pille kann keine Actions).
                 from voice_flow.notifications import ToastKind
+                image_note = (
+                    f" · {pasted_images} Bild" if pasted_images == 1
+                    else f" · {pasted_images} Bilder" if pasted_images else ""
+                )
                 self.overlay.notify(
                     ToastKind.TRANSCRIPT,
                     f"{word_label}",
-                    f"{total_s:.1f}s · eingefuegt",
+                    f"{total_s:.1f}s · eingefuegt{image_note}",
                     actions=[("Kopieren", lambda t=final_text: _copy_to_clipboard(t))],
                     duration_ms=4500,
                 )

@@ -6,16 +6,26 @@ Headless-Grab-Smoke verifiziert, nicht im Unit-Test.
 """
 from __future__ import annotations
 
-import ctypes
-import ctypes.wintypes
 import logging
+import sys
 
 from PIL import Image
+
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
 
 log = logging.getLogger(__name__)
 
 
 def get_cursor_pos() -> tuple[int, int]:
+    if sys.platform == "darwin":
+        # pynput ist ohnehin Abhaengigkeit des Mac-Ports; Quartz-Koordinaten
+        # passen direkt zu den mss-Monitor-Rechtecken.
+        from pynput.mouse import Controller
+
+        x, y = Controller().position
+        return (int(x), int(y))
     pt = ctypes.wintypes.POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     return (pt.x, pt.y)

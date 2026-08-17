@@ -11,3 +11,5 @@ mss>=9.0.0
 pycaw>=20240210
 comtypes>=1.4.0
 PyQt6>=6.6.0
+soundfile>=0.12.1
+pynput>=1.7.6 ; sys_platform == "darwin"

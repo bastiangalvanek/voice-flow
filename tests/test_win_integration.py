@@ -24,6 +24,7 @@ def test_cli_usage_on_bad_args(capsys):
     assert "set-aumid" in capsys.readouterr().out
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="COM/Shell nur auf Windows")
 def test_set_shortcut_aumid_missing_file():
     with pytest.raises(FileNotFoundError):
         wi.set_shortcut_aumid("does-not-exist.lnk")

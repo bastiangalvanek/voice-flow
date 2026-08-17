@@ -49,6 +49,22 @@ class Settings:
         value = self._data.get("audio_device")
         return value if isinstance(value, str) and value.strip() else None
 
+    @property
+    def paste_mode(self) -> str:
+        """Ziel-Modus-Einstellung: "auto" | "claude_code" | "ai_web".
+
+        Default "auto" — die Vorder-App entscheidet (target_mode.resolve_mode).
+        Unbekannter Wert in der Datei faellt still auf "auto" zurueck.
+        """
+        from voice_flow.target_mode import SETTING_AUTO, SETTING_CYCLE
+
+        value = self._data.get("paste_mode")
+        return value if value in SETTING_CYCLE else SETTING_AUTO
+
+    def set_paste_mode(self, mode: str) -> None:
+        self._data["paste_mode"] = mode
+        self._save()
+
     def set_audio_device(self, name: str | None) -> None:
         if name:
             self._data["audio_device"] = name

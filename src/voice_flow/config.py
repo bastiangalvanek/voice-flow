@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -18,11 +19,14 @@ class Config:
     # 17.05 Bastian: zurueck auf F8 (Strg+Win ging nicht — Win-Taste wird vom
     # System abgefangen bevor keyboard-lib sie sieht, plus deutsche Tastatur
     # nennt Strg "strg" statt "ctrl"). F8 single-key ist robust + proven.
-    hotkey: str = "f8"
+    # 13.08 Bastian (Mac): F8 ist auf dem MacBook die Play-Taste, F7 die
+    # Zurueck-Taste — beide sollen der Musik gehoeren. Mac nimmt F5 (Aufnahme)
+    # und F3 (Screenshot); Windows bleibt bei F8/F7.
+    hotkey: str = "f5" if sys.platform == "darwin" else "f8"
     # 27.06 Bastian: F8 jetzt Toggle (1x = Start, nochmal = Stop). "hold" bleibt waehlbar.
     hotkey_mode: str = "toggle"  # "toggle" | "hold"
     # 27.06 Bastian: F7 = Screenshot des Monitors unter der Maus in den Session-Bucket.
-    screenshot_hotkey: str = "f7"
+    screenshot_hotkey: str = "f3" if sys.platform == "darwin" else "f7"
     # 27.06 Bastian: F6 = Loom-Zeichen-Overlay, dann Screenshot MIT Markierungen.
     annotate_hotkey: str = "f6"
     # 27.06 Bastian: Session-Buckets unter ~/voice-flow/sessions/<timestamp>/.
@@ -93,9 +97,9 @@ def load_config(overrides: dict | None = None) -> Config:
     cfg = Config(
         openai_api_key=openai_key,
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
-        hotkey=os.getenv("VOICE_FLOW_HOTKEY", "f8"),
+        hotkey=os.getenv("VOICE_FLOW_HOTKEY", "f5" if sys.platform == "darwin" else "f8"),
         hotkey_mode=os.getenv("VOICE_FLOW_HOTKEY_MODE", "toggle"),
-        screenshot_hotkey=os.getenv("VOICE_FLOW_SCREENSHOT_HOTKEY", "f7"),
+        screenshot_hotkey=os.getenv("VOICE_FLOW_SCREENSHOT_HOTKEY", "f3" if sys.platform == "darwin" else "f7"),
         annotate_hotkey=os.getenv("VOICE_FLOW_ANNOTATE_HOTKEY", "f6"),
         language=os.getenv("VOICE_FLOW_LANGUAGE", "de"),
         whisper_model=os.getenv("VOICE_FLOW_WHISPER_MODEL", "gpt-4o-mini-transcribe"),

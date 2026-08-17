@@ -12,6 +12,7 @@ status_display() ist reine Logik (ohne Qt) und unit-getestet.
 from __future__ import annotations
 
 import logging
+import sys
 
 from voice_flow.audio import clean_device_name
 from voice_flow.logo_loader import resolve_icon_path, resolve_logo_path
@@ -71,7 +72,7 @@ def build_control_window_class():
         sig_show = pyqtSignal()
         sig_devices = pyqtSignal(object)  # payload: (devices, selected_name, on_select)
 
-        def __init__(self, on_quit, hotkey_label: str = "F8"):
+        def __init__(self, on_quit, hotkey_label: str = "F5" if sys.platform == "darwin" else "F8"):
             super().__init__()
             self._on_quit = on_quit
             self._on_device_select = None  # callback(name) — gesetzt via set_devices
@@ -171,7 +172,7 @@ def build_control_window_class():
             # F9 (Senden) kommt sobald das Feature gebaut ist.
             return [
                 (record_key, "Aufnahme starten / stoppen"),
-                ("F7", "Screenshot (Monitor unter der Maus)"),
+                ("F3" if sys.platform == "darwin" else "F7", "Screenshot (Monitor unter der Maus)"),
                 ("F6", "Markieren + Screenshot"),
             ]
 

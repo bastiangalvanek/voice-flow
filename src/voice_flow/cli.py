@@ -7,7 +7,11 @@ import sys
 import threading
 import time
 
-import keyboard
+if sys.platform == "darwin":
+    # Die `keyboard`-Bibliothek stirbt auf macOS schon beim Import.
+    from voice_flow import _keyboard_mac as keyboard
+else:
+    import keyboard
 
 from voice_flow.app import VoiceFlowApp
 from voice_flow.config import Config, load_config
@@ -144,9 +148,9 @@ def _setup_toggle_hotkey(hotkey: str, on_toggle) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="voice-flow",
-        description="Diktat-Tool. F8 druecken = Aufnahme an, nochmal = aus. Text landet im aktiven Fenster.",
+        description="Diktat-Tool. Hotkey druecken = Aufnahme an, nochmal = aus (Mac: F5, Windows: F8). Text landet im aktiven Fenster.",
     )
-    p.add_argument("--hotkey", help="Push-to-Talk-Taste (Default: f8 oder VOICE_FLOW_HOTKEY env)")
+    p.add_argument("--hotkey", help="Push-to-Talk-Taste (Default: Mac f5 / Windows f8, oder VOICE_FLOW_HOTKEY env)")
     p.add_argument("--no-tray", action="store_true", help="Tray-Icon deaktivieren")
     p.add_argument(
         "--no-overlay",
@@ -373,6 +377,18 @@ def main(argv: list[str] | None = None) -> int:
 
     lock.set_command_handler(handle_ipc)
 
+    # macOS: Berechtigungen AKTIV anfragen. pynput loest den Dialog nie selbst
+    # aus — ohne das hier bleibt F8 fuer immer stumm und niemand sieht warum.
+    if sys.platform == "darwin":
+        from voice_flow import darwin_permissions
+
+        def _notify_perm(msg: str) -> None:
+            if app.overlay is not None and getattr(app.overlay, "available", False):
+                app.overlay.show_info("Bedienungshilfen fehlen — Einstellungen geoeffnet", 8000)
+            print(f"\n  !!! {msg}\n")
+
+        darwin_permissions.ensure_all(notify=_notify_perm)
+
     # Sichtbare + hoerbare Startup-Notice — sonst weiss Bastian nicht dass es laeuft
     # (pythonw hat keine Konsole, Tray-Icon ist oft in Windows-Overflow-Menu versteckt).
     app.show_ready()
@@ -382,7 +398,16 @@ def main(argv: list[str] | None = None) -> int:
         # kehrt bei keyboard.unhook_all() NICHT zurueck. Hotkeys laufen in
         # keyboards eigenem (daemon) Listener-Thread; dieser Main-Thread parkt
         # nur, bis quit_handler quit_event setzt.
-        quit_event.wait()
+        #
+        # macOS: AppKit verlangt die Qt-Schleife im Haupt-Thread. Statt hier zu
+        # parken, laeuft sie hier — beendet wird sie per QTimer, sobald
+        # quit_event gesetzt ist. Ohne Overlay (--no-overlay) bleibt es beim
+        # klassischen Parken.
+        _ov = getattr(app, "overlay", None)
+        if sys.platform == "darwin" and _ov is not None and getattr(_ov, "available", False):
+            _ov.exec_main_loop(quit_event)
+        else:
+            quit_event.wait()
     except KeyboardInterrupt:
         log.info("KeyboardInterrupt — beende.")
         quit_handler()  # Watchdog armen + Event setzen

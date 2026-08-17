@@ -132,6 +132,8 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
             self._hide_timer = QTimer(self)
             self._hide_timer.setSingleShot(True)
             self._hide_timer.timeout.connect(self._on_hide_timer)
+            # Modus-Chip neben der Pille (wird von RecordingOverlay gesetzt).
+            self._chip = None
 
             # Logo laden
             self._logo_pixmap = None
@@ -153,6 +155,10 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
             )
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+            # macOS versteckt Tool-Fenster sobald die App inaktiv ist — beim
+            # Diktieren ist IMMER eine andere App aktiv. Ohne dieses Attribut
+            # bleiben Pille und Toasts fuer den Nutzer unsichtbar.
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
 
             # Window size: pill_width + shadow padding
             self._pill_height = _PillWidget.PILL_HEIGHT
@@ -268,6 +274,7 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
             self._state = self.STATE_HIDDEN
             self._render_timer.stop()
             self.hide()
+            self._notify_chip(None)
 
         def _enter_state(self, new_state: str, width: int, accent: str,
                          primary: str, secondary: str):
@@ -293,6 +300,20 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
             self.show()
             self.update()
             self._render_timer.start()
+            self._notify_chip(self.visible_pill_rect())
+
+        def visible_pill_rect(self) -> tuple:
+            """Rechteck der SICHTBAREN Pille (Fenster minus Schatten-Rand)."""
+            return (
+                self.x() + self._shadow_padding,
+                self.y() + self._shadow_padding,
+                self._current_width,
+                self._pill_height,
+            )
+
+        def _notify_chip(self, rect) -> None:
+            if self._chip is not None:
+                self._chip.sig_place.emit(rect)
 
         @pyqtSlot()
         def _on_hide_timer(self):
@@ -558,16 +579,27 @@ class RecordingOverlay:
         self._control = None  # ControlWindow (sichtbar in Taskleiste)
         self._device_controls = None  # (devices, selected, on_select), falls vor _control gesetzt
         self._annotate_bridge = None  # erzeugt das F6-Zeichen-Overlay auf dem Qt-Thread
+        self._chip = None  # ModeChipWidget (Claude Code vs. AI-Web)
+        self._mode_chip_state = None  # (label, mode), falls vor dem Chip gesetzt
+        self._on_mode_click_cb: Optional[Callable[[], None]] = None
         self._on_quit_cb: Optional[Callable[[], None]] = None
         self._app = None
         self._ready = threading.Event()
         self._available = False
 
-        self._thread = threading.Thread(
-            target=self._run_qt, daemon=True, name="overlay-qt"
-        )
-        self._thread.start()
-        self._ready.wait(timeout=5.0)
+        if sys.platform == "darwin":
+            # macOS/AppKit erlaubt GUI-Objekte NUR im Haupt-Thread. Qt hier im
+            # Thread hochzuziehen bricht mit NSException ab. Also: Aufbau jetzt
+            # synchron (wir sind im Haupt-Thread), Ereignisschleife spaeter per
+            # exec_main_loop() aus cli.main().
+            self._thread = None
+            self._run_qt(run_loop=False)
+        else:
+            self._thread = threading.Thread(
+                target=self._run_qt, daemon=True, name="overlay-qt"
+            )
+            self._thread.start()
+            self._ready.wait(timeout=5.0)
 
     @property
     def available(self) -> bool:
@@ -610,6 +642,20 @@ class RecordingOverlay:
                 duration_ms=duration_ms,
             ))
 
+    def set_mode_chip(self, label: str, mode: str) -> None:
+        """Modus-Chip beschriften (thread-safe). Vor Chip-Existenz: gemerkt."""
+        self._mode_chip_state = (label, mode)
+        if self._chip is not None:
+            self._chip.sig_set_mode.emit(label, mode)
+
+    def set_mode_click_handler(self, cb: Callable[[], None]) -> None:
+        """Was ein Klick auf den Chip macht — vom App-Controller gesetzt."""
+        self._on_mode_click_cb = cb
+
+    def _fire_mode_click(self) -> None:
+        if self._on_mode_click_cb:
+            self._on_mode_click_cb()
+
     def set_quit_handler(self, cb: Callable[[], None]) -> None:
         """Vom CLI gesetzt: was passiert wenn das Control-Fenster geschlossen wird."""
         self._on_quit_cb = cb
@@ -641,6 +687,7 @@ class RecordingOverlay:
         daher ein Signal, dessen Slot (queued) auf dem Qt-Thread laeuft und dort
         AnnotateOverlay instanziiert (gleiches Muster wie ToastManager.sig_notify).
         """
+        log.debug("F6: bridge=%s", "da" if self._annotate_bridge is not None else "FEHLT")
         if self._annotate_bridge is not None:
             self._annotate_bridge.sig_open.emit(monitor, on_shoot)
 
@@ -661,7 +708,7 @@ class RecordingOverlay:
             except Exception as ex:
                 log.debug("app.quit invoke error: %s", ex)
 
-    def _run_qt(self) -> None:
+    def _run_qt(self, run_loop: bool = True) -> None:
         try:
             from PyQt6.QtCore import (Qt, QRect, QRectF, QPointF, QTimer,
                                        pyqtSignal, pyqtSlot)
@@ -676,9 +723,24 @@ class RecordingOverlay:
             return
 
         try:
+            if sys.platform == "darwin":
+                # Sonst steht "Python" in Menuleiste und Dock. Muss VOR der
+                # QApplication-Erzeugung passieren; pyobjc ist als Abhaengigkeit
+                # von pystray/mss ohnehin installiert.
+                try:
+                    from Foundation import NSBundle
+                    _info = NSBundle.mainBundle().infoDictionary()
+                    if _info is not None:
+                        _info["CFBundleName"] = "Voice Flow"
+                        _info["CFBundleDisplayName"] = "Voice Flow"
+                except Exception as ex:
+                    log.debug("App-Name-Umbenennung fehlgeschlagen: %s", ex)
+
             self._app = QApplication.instance()
             if self._app is None:
                 self._app = QApplication(sys.argv if hasattr(sys, "argv") else [])
+            self._app.setApplicationName("Voice Flow")
+            self._app.setApplicationDisplayName("Voice Flow")
             # Lifecycle haengt an keyboard.wait()/quit_handler, NICHT an Fenstern.
             # Sonst wuerde das Verstecken der Pille die ganze App beenden.
             self._app.setQuitOnLastWindowClosed(False)
@@ -695,6 +757,28 @@ class RecordingOverlay:
                 pyqtSignal, pyqtSlot,
             )
             self._widget = PillWidget(self._level_provider)
+
+            # Modus-Chip (Claude Code vs. AI-Web) direkt neben der Pille.
+            try:
+                from voice_flow.mode_chip import build_mode_chip_class
+
+                self._chip = build_mode_chip_class()(on_click=self._fire_mode_click)
+                self._widget._chip = self._chip
+                screen = QApplication.primaryScreen().availableGeometry()
+                # Zone, in der die Pille im Aufnahme-Zustand erscheint — daran
+                # haengt der Hover im Ruhezustand.
+                self._chip.set_idle_rect((
+                    screen.x() + (screen.width() - _PillWidget.WIDTH_RECORDING) // 2,
+                    screen.y() + screen.height() - _PillWidget.PILL_HEIGHT
+                    - _PillWidget.BOTTOM_OFFSET,
+                    _PillWidget.WIDTH_RECORDING,
+                    _PillWidget.PILL_HEIGHT,
+                ))
+                if self._mode_chip_state is not None:
+                    self._chip.sig_set_mode.emit(*self._mode_chip_state)
+            except Exception as ex:
+                log.warning("Modus-Chip-Init fehlgeschlagen: %s", ex)
+                self._chip = None
 
             # Premium Toast-System im selben Qt-Thread (eine QApplication).
             try:
@@ -731,10 +815,35 @@ class RecordingOverlay:
 
             self._available = True
             self._ready.set()
-            self._app.exec()
+            if run_loop:
+                self._app.exec()
         except Exception as ex:
             log.exception("Qt-Overlay crashed: %s", ex)
             self._ready.set()
+
+    def exec_main_loop(self, quit_event=None, poll_ms: int = 120) -> None:
+        """Qt-Ereignisschleife im Haupt-Thread laufen lassen (nur macOS).
+
+        Auf Windows/Linux laeuft die Schleife im overlay-qt-Thread und diese
+        Methode kehrt sofort zurueck — dort parkt cli.main() weiter auf dem
+        quit_event.
+
+        quit_event: threading.Event. Wird per QTimer gepollt, weil ein
+        threading.Event die Qt-Schleife nicht von sich aus aufwecken kann.
+        """
+        if sys.platform != "darwin" or self._app is None:
+            return
+        if quit_event is not None:
+            from PyQt6.QtCore import QTimer
+
+            timer = QTimer()
+            timer.setInterval(poll_ms)
+            timer.timeout.connect(
+                lambda: self._app.quit() if quit_event.is_set() else None
+            )
+            timer.start()
+            self._quit_timer = timer  # Referenz halten, sonst raeumt der GC ihn ab
+        self._app.exec()
 
 
 def _build_annotate_bridge_class():
@@ -763,6 +872,7 @@ def _build_annotate_bridge_class():
             self._overlay = None
 
         def _on_open(self, monitor, on_shoot):
+            log.debug("F6: Qt-Slot _on_open erreicht")
             # 27.06 Bastian: F6 ist ein TOGGLE. Ist ein Overlay offen -> F6 schliesst
             # es (Abbrechen, kein Shoot) und oeffnet KEIN neues. Sonst -> oeffnen.
             # Debounce nur gegen Typematic-Doppelfeuer (~50ms); 0.12s laesst bewusstes

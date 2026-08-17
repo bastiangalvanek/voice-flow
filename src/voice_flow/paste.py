@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time
 
-import keyboard
 import pyperclip
+
+if sys.platform == "darwin":
+    # Die `keyboard`-Bibliothek stirbt auf macOS schon beim Import.
+    from voice_flow import _keyboard_mac as keyboard
+else:
+    import keyboard
 
 log = logging.getLogger(__name__)
 
@@ -60,3 +66,22 @@ def paste_to_active_window(text: str, restore_clipboard: bool = False) -> None:
         pyperclip.copy(old)
     except Exception as ex:
         log.warning("Konnte Clipboard nicht restaurieren: %s", ex)
+
+
+def paste_files_to_active_window(paths: list) -> int:
+    """Legt die Bilder als DATEIEN in die Zwischenablage und fuegt sie EINMAL ein.
+
+    Gibt die Anzahl eingefuegter Dateien zurueck (0 = nichts passiert).
+    Bewusst OHNE Clipboard-Restore: bleibt die Dateiliste liegen, kann Bastian
+    im Browser jederzeit selbst nochmal Cmd+V druecken, wenn eine Web-App den
+    ersten Wurf verschluckt.
+    """
+    from voice_flow.clipboard_files import copy_files_to_clipboard
+
+    count = copy_files_to_clipboard(paths)
+    if count == 0:
+        return 0
+    time.sleep(PRE_PASTE_DELAY_SEC)
+    keyboard.send("ctrl+v")
+    time.sleep(POST_PASTE_DELAY_SEC)
+    return count

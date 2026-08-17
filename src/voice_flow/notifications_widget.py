@@ -76,6 +76,10 @@ def build_toast_class():
             self.setWindowFlags(flags)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
             self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+            # macOS versteckt Tool-Fenster sobald die App inaktiv ist — beim
+            # Diktieren ist IMMER eine andere App aktiv. Ohne dieses Attribut
+            # bleiben Pille und Toasts fuer den Nutzer unsichtbar.
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
             self.resize(CARD_WIDTH + SHADOW_PAD * 2, self._card_h + SHADOW_PAD * 2)
 
             self._fonts()

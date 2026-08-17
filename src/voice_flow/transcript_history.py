@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -113,7 +114,11 @@ def open_history_in_explorer() -> bool:
     if not HISTORY_DIR.exists():
         HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        os.startfile(str(HISTORY_DIR))  # Windows-only — passt fuer Voice Flow
+        if sys.platform == "darwin":
+            import subprocess
+            subprocess.Popen(["open", str(HISTORY_DIR)])
+        else:
+            os.startfile(str(HISTORY_DIR))  # Windows
         return True
     except Exception as ex:
         log.warning("Konnte History-Ordner nicht oeffnen: %s", ex)

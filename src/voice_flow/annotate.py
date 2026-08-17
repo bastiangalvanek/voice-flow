@@ -148,6 +148,10 @@ def build_annotate_class():
             )
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
             self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+            # macOS versteckt Tool-Fenster sobald die App inaktiv ist — F6 wird
+            # aber IMMER aus einer fremden App heraus gedrueckt. Gleiche Kur wie
+            # bei Pille und Toasts.
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
             self.setMouseTracking(True)
             self.setCursor(Qt.CursorShape.CrossCursor)
 
