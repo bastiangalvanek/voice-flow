@@ -30,7 +30,9 @@ PAD_X = 10               # Innen-Polster links/rechts in der Leiste
 GAP = 4                  # Abstand zwischen Knoepfen
 SEP_GAP = 14             # Abstand an einer Gruppengrenze
 LABEL_PAD = 14           # Polster links/rechts um eine Beschriftung
-GAP_TO_PILL = 10         # Abstand zwischen Aufnahme-Pille und Leiste
+# Rechts an der Pille sitzt erst der Stift-Knopf (34px, Abstand 30), danach die
+# Leiste — sonst liegen beide uebereinander.
+GAP_TO_PILL = 30 + 34 + 10
 CHAR_W = 7.2             # grobe Zeichenbreite fuer die Breitenrechnung
 
 
@@ -46,6 +48,7 @@ class ToolbarItem:
     label: str | None = None
     icon: str | None = None          # Glyph-Name fuers Malen
     needs_strokes: bool = False      # ausgegraut, solange nichts gezeichnet ist
+    needs_redo: bool = False         # ausgegraut, solange nichts zurueckgenommen wurde
     separator_before: bool = False
 
     @property
@@ -59,8 +62,9 @@ _SPEC: list[dict] = [
     {"kind": "tool", "value": "pen", "label": "Annotation", "icon": "pen"},
     {"kind": "action", "value": "undo", "icon": "undo", "needs_strokes": True,
      "separator_before": True},
-    {"kind": "action", "value": "redo", "icon": "redo", "needs_strokes": True},
-    {"kind": "action", "value": "clear", "label": "Clear", "needs_strokes": True},
+    {"kind": "action", "value": "redo", "icon": "redo", "needs_redo": True},
+    {"kind": "action", "value": "clear", "label": "Clear", "icon": "clear",
+     "needs_strokes": True},
     {"kind": "action", "value": "shoot", "icon": "shoot", "separator_before": True},
     {"kind": "action", "value": "cancel", "icon": "cancel"},
 ]
@@ -76,7 +80,8 @@ def _item_width(spec: dict) -> int:
     return breite
 
 
-def build_toolbar(viewport_w: int, viewport_h: int) -> list[ToolbarItem]:
+def build_toolbar(viewport_w: int, viewport_h: int,
+                  nutzbar_unten: int | None = None) -> list[ToolbarItem]:
     """Knoepfe nebeneinander, RECHTS neben der Aufnahme-Pille.
 
     18.08 Bastian: "dann kommt es hier drunter, das soll rechts neben dem
@@ -89,7 +94,7 @@ def build_toolbar(viewport_w: int, viewport_h: int) -> list[ToolbarItem]:
         if i > 0:
             gesamt += SEP_GAP if spec.get("separator_before") else GAP
 
-    px, py, pw, ph = pill_rect_on(viewport_w, viewport_h)
+    px, py, pw, ph = pill_rect_on(viewport_w, viewport_h, nutzbar_unten)
     start_x = px + pw + GAP_TO_PILL + PAD_X
     y = py + (ph - BTN_H) // 2
     if start_x + gesamt + PAD_X > viewport_w:      # kein Platz rechts
@@ -106,6 +111,7 @@ def build_toolbar(viewport_w: int, viewport_h: int) -> list[ToolbarItem]:
             width=breiten[i], height=BTN_H,
             label=spec.get("label"), icon=spec.get("icon"),
             needs_strokes=bool(spec.get("needs_strokes")),
+            needs_redo=bool(spec.get("needs_redo")),
             separator_before=bool(spec.get("separator_before")),
         ))
         x += breiten[i]
@@ -129,6 +135,13 @@ def hit_test(point: tuple[int, int], items: list[ToolbarItem]) -> ToolbarItem | 
     return None
 
 
-def is_enabled(item: ToolbarItem, hat_striche: bool) -> bool:
-    """Zurueck, Vor und Clear sind tot, solange nichts gezeichnet ist."""
+def is_enabled(item: ToolbarItem, hat_striche: bool, hat_zurueckgenommenes: bool = False) -> bool:
+    """Welche Knoepfe sind bedienbar?
+
+    Zurueck und Clear brauchen Striche. "Vor" haengt dagegen am Zurueck-Stapel:
+    gemessen 18.08. war es tot, weil nach dem Zurueck ja keine Striche mehr da
+    waren — genau dann muss es aber gehen.
+    """
+    if item.needs_redo:
+        return hat_zurueckgenommenes
     return hat_striche or not item.needs_strokes

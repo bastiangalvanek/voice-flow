@@ -25,8 +25,16 @@ PILL_BOTTOM_OFFSET = 24
 PILL_WIDTH_RECORDING = 250
 
 
-def pill_rect_on(viewport_w: int, viewport_h: int) -> tuple[int, int, int, int]:
-    """(x, y, w, h) der Aufnahme-Pille auf einem Bildschirm dieser Groesse."""
+def pill_rect_on(viewport_w: int, viewport_h: int,
+                 nutzbar_unten: int | None = None) -> tuple[int, int, int, int]:
+    """(x, y, w, h) der Aufnahme-Pille auf einem Bildschirm dieser Groesse.
+
+    nutzbar_unten: Unterkante des NUTZBAREN Bereichs (ohne Dock). Die Pille
+    richtet sich daran aus, nicht an der vollen Bildschirmhoehe — gemessen
+    18.08.: 69 Pixel Unterschied, wodurch die Zeichen-Leiste zeitweise hinter
+    dem Dock lag und ihre Knoepfe nicht zu treffen waren.
+    """
+    unten = viewport_h if nutzbar_unten is None else nutzbar_unten
     x = (viewport_w - PILL_WIDTH_RECORDING) // 2
-    y = viewport_h - PILL_HEIGHT - PILL_BOTTOM_OFFSET
+    y = unten - PILL_HEIGHT - PILL_BOTTOM_OFFSET
     return (x, y, PILL_WIDTH_RECORDING, PILL_HEIGHT)

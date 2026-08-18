@@ -11,6 +11,7 @@ Reine Mal-Logik, keine Zustandsaenderung. Die Qt-Klassen kommen per Bundle rein
 from __future__ import annotations
 
 from voice_flow.annotate_toolbar import ToolbarItem, is_enabled, pill_rect
+from voice_flow.icons import load as load_icon
 
 # Farben aus Lovables Leiste abgelesen.
 BAR_BG = (22, 22, 27, 242)
@@ -23,7 +24,8 @@ HOVER_FILL = (255, 255, 255, 22)
 
 
 def paint_toolbar(p, items: list[ToolbarItem], active_tool: str,
-                  qt, hat_striche: bool = True, hover_value=None) -> None:
+                  qt, hat_striche: bool = True, hover_value=None,
+                  hat_zurueckgenommenes: bool = False) -> None:
     """Malt die Leiste samt Knoepfen.
 
     hat_striche: steuert die ausgegrauten Knoepfe (Zurueck/Vor/Clear).
@@ -39,7 +41,7 @@ def paint_toolbar(p, items: list[ToolbarItem], active_tool: str,
 
     for it in items:
         aktiv = it.kind == "tool" and it.value == active_tool
-        an = is_enabled(it, hat_striche)
+        an = is_enabled(it, hat_striche, hat_zurueckgenommenes)
         _paint_button(p, it, aktiv=aktiv, enabled=an,
                       hover=(hover_value is not None and it.value == hover_value and an),
                       qt=qt)
@@ -92,35 +94,24 @@ def _paint_button(p, it: ToolbarItem, aktiv: bool, enabled: bool, hover: bool, q
         )
 
 
+# Lucide-Dateiname je Knopf (assets/icons/).
+ICON_DATEI = {
+    "pen": "pencil",
+    "undo": "undo-2",
+    "redo": "redo-2",
+    "clear": "eraser",
+    "shoot": "camera",
+    "cancel": "x",
+}
+ICON_SIZE = 17
+
+
 def _paint_icon(p, name: str, cx: float, cy: float, farbe, qt) -> None:
-    QRectF, QPointF, QColor, QPen = qt.QRectF, qt.QPointF, qt.QColor, qt.QPen
-    if name == "pen":
-        p.drawLine(QPointF(cx - 6, cy + 6), QPointF(cx + 4, cy - 4))
-        p.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx + 6, cy - 2))
-        p.drawLine(QPointF(cx + 6, cy - 2), QPointF(cx - 4, cy + 8))
-        p.drawLine(QPointF(cx - 4, cy + 8), QPointF(cx - 7, cy + 8))
-    elif name in ("undo", "redo"):
-        # 18.08 Bastian: "die Zurueck- und Vor-Buttons sind kacke". Jetzt der
-        # uebliche Bogen mit richtiger Pfeilspitze (wie in jeder Zeichen-App):
-        # ein 3/4-Kreis, dessen Ende in eine gefuellte Spitze laeuft.
-        links = name == "undo"
-        r = 7.0
-        start = 150 if links else 30           # Grad, wo der Bogen beginnt
-        p.drawArc(QRectF(cx - r, cy - r + 1, 2 * r, 2 * r),
-                  int(start * 16), int((240 if links else -240) * 16))
-        # Spitze am freien Ende des Bogens.
-        import math as _m
-        winkel = _m.radians(start)
-        ex, ey = cx + r * _m.cos(winkel), cy + 1 - r * _m.sin(winkel)
-        richtung = 1 if links else -1
-        p.drawLine(QPointF(ex, ey), QPointF(ex + 5 * richtung, ey - 1))
-        p.drawLine(QPointF(ex, ey), QPointF(ex + 1 * richtung, ey - 5))
-    elif name == "shoot":
-        # Kamera: Voice-Flow-eigen, nimmt den Bildschirm mit den Markierungen auf.
-        p.drawRoundedRect(QRectF(cx - 8, cy - 5, 16, 12), 2.5, 2.5)
-        p.drawLine(QPointF(cx - 3, cy - 5), QPointF(cx - 1.5, cy - 8))
-        p.drawLine(QPointF(cx - 1.5, cy - 8), QPointF(cx + 2, cy - 8))
-        p.drawEllipse(QPointF(cx, cy + 1), 3.2, 3.2)
-    elif name == "cancel":
-        p.drawLine(QPointF(cx - 5, cy - 5), QPointF(cx + 5, cy + 5))
-        p.drawLine(QPointF(cx + 5, cy - 5), QPointF(cx - 5, cy + 5))
+    """Symbol mittig auf (cx, cy) malen — echte SVG-Datei, in der Knopf-Farbe."""
+    datei = ICON_DATEI.get(name)
+    if datei is None:
+        return
+    pix = load_icon(datei, farbe.name(), ICON_SIZE)
+    if pix is None:
+        return
+    p.drawPixmap(int(cx - ICON_SIZE / 2), int(cy - ICON_SIZE / 2), pix)

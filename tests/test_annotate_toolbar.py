@@ -44,11 +44,15 @@ def test_beschriftete_knoepfe_sind_breiter_als_symbol_knoepfe():
     assert items["clear"].width > items["cancel"].width
 
 
-def test_zurueck_vor_und_clear_sind_tot_ohne_striche():
+def test_zurueck_und_clear_brauchen_striche_vor_braucht_den_stapel():
+    """18.08 gemessen: "Vor" war tot, weil nach dem Zurueck keine Striche mehr
+    da waren — genau dann muss es aber gehen."""
     items = {it.value: it for it in _layout()}
-    for wert in ("undo", "redo", "clear"):
+    for wert in ("undo", "clear"):
         assert is_enabled(items[wert], hat_striche=False) is False
         assert is_enabled(items[wert], hat_striche=True) is True
+    assert is_enabled(items["redo"], hat_striche=True, hat_zurueckgenommenes=False) is False
+    assert is_enabled(items["redo"], hat_striche=False, hat_zurueckgenommenes=True) is True
     # Stift, Aufnehmen und Schliessen gehen immer.
     for wert in ("pen", "shoot", "cancel"):
         assert is_enabled(items[wert], hat_striche=False) is True
@@ -63,7 +67,8 @@ def test_leiste_liegt_rechts_neben_der_aufnahme_pille():
     px, py, pw, ph = pill_rect_on(1470, 956)
     left, top, width, height = pill_rect(items)
     assert left > px + pw, "Leiste beginnt erst rechts von der Pille"
-    assert left - (px + pw) < 30, "aber direkt daneben, nicht irgendwo"
+    # Zwischen Pille und Leiste sitzt der Stift-Knopf (34px) plus Abstaende.
+    assert left - (px + pw) < 90, "aber in Reichweite, nicht irgendwo"
     assert height == BAR_HEIGHT
     # Auf gleicher Hoehe wie die Pille (Mitte auf Mitte, ein paar Pixel Toleranz).
     assert abs((top + height / 2) - (py + ph / 2)) <= 2

@@ -196,7 +196,10 @@ def build_mode_chip_class():
 
 
 PEN_BUTTON_SIZE = 34
-PEN_BUTTON_GAP = 8
+# 18.08 gemessen: das Pillen-FENSTER ist 24px breiter als die sichtbare Pille
+# (Schatten-Polster) und liegt darueber. Mit nur 8px Abstand lag der Stift-Knopf
+# darunter und bekam keine Klicks. Deshalb Abstand > Schattenrand.
+PEN_BUTTON_GAP = 30
 
 
 def build_pen_button_class():

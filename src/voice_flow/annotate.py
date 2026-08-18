@@ -172,7 +172,15 @@ def build_annotate_class():
             self.setGeometry(g.x(), g.y(), g.width(), g.height())
             # 18.08 Bastian: Leiste waagerecht unten mittig, direkt ueber der
             # Aufnahme-Pille, statt senkrecht am linken Rand.
-            self._toolbar: list[ToolbarItem] = build_toolbar(g.width(), g.height())
+            # Die Pille sitzt ueber dem Dock (nutzbarer Bereich), das Overlay
+            # deckt aber den ganzen Bildschirm ab — Differenz durchreichen,
+            # sonst laege die Leiste hinter dem Dock.
+            from PyQt6.QtWidgets import QApplication as _QApp
+
+            _nutzbar = _QApp.primaryScreen().availableGeometry()
+            self._toolbar: list[ToolbarItem] = build_toolbar(
+                g.width(), g.height(),
+                nutzbar_unten=(_nutzbar.y() + _nutzbar.height()) - g.y())
             self._hover_value = None      # Knopf unter der Maus (fuer den Hover)
 
 
@@ -194,9 +202,10 @@ def build_annotate_class():
         def mousePressEvent(self, e):
             pos = e.position()
             pt = (int(pos.x()), int(pos.y()))
+            log.debug("Zeichen-Overlay: Klick bei %s", pt)
             hit = hit_test(pt, self._toolbar)
             if hit is not None:
-                if is_enabled(hit, bool(self._strokes)):
+                if is_enabled(hit, bool(self._strokes), bool(self._redo_stack)):
                     self._activate(hit)
                 return
             self._current = {
@@ -243,6 +252,12 @@ def build_annotate_class():
 
         def _activate(self, item: ToolbarItem) -> None:
             if item.kind == "tool":
+                # 18.08 Bastian: "bekomme nur mit Escape den Stift weg". Ein
+                # Klick auf den schon aktiven Stift schaltet das Zeichnen wieder
+                # aus — genau wie bei Lovable.
+                if str(item.value) == self._tool:
+                    self.close()
+                    return
                 self._tool = str(item.value)
             elif item.kind == "action":
                 self._do_action(str(item.value))
@@ -374,7 +389,8 @@ def build_annotate_class():
         def _paint_toolbar(self, p):
             paint_toolbar(p, self._toolbar, self._tool, _qt,
                           hat_striche=bool(self._strokes),
-                          hover_value=self._hover_value)
+                          hover_value=self._hover_value,
+                          hat_zurueckgenommenes=bool(self._redo_stack))
 
         def closeEvent(self, e):
             # Der Bridge melden dass dieses Overlay zu ist (F6-Toggle + saubere Referenz).
