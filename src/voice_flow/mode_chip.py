@@ -196,10 +196,10 @@ def build_mode_chip_class():
 
 
 PEN_BUTTON_SIZE = 34
-# 18.08 gemessen: das Pillen-FENSTER ist 24px breiter als die sichtbare Pille
-# (Schatten-Polster) und liegt darueber. Mit nur 8px Abstand lag der Stift-Knopf
-# darunter und bekam keine Klicks. Deshalb Abstand > Schattenrand.
-PEN_BUTTON_GAP = 30
+# 18.08 Bastian: "es soll hier angedockt sein". Der Knopf sitzt direkt an der
+# Pillenkante. Dass er trotz des 24px breiten Schatten-Fensters der Pille Klicks
+# bekommt, sichert das raise_() beim Platzieren.
+PEN_BUTTON_GAP = 6
 
 
 def build_pen_button_class():
@@ -268,15 +268,11 @@ def build_pen_button_class():
             p.fillPath(kreis, QColor(SURFACE_BASE))
             p.strokePath(kreis, QColor(SURFACE_BORDER))
 
-            stift = QPen(QColor(TEXT_SECONDARY), 1.8)
-            stift.setCapStyle(Qt.PenCapStyle.RoundCap)
-            stift.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-            p.setPen(stift)
-            cx, cy = self.width() / 2, self.height() / 2
-            p.drawLine(QPointF(cx - 6, cy + 6), QPointF(cx + 4, cy - 4))
-            p.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx + 6, cy - 2))
-            p.drawLine(QPointF(cx + 6, cy - 2), QPointF(cx - 4, cy + 8))
-            p.drawLine(QPointF(cx - 4, cy + 8), QPointF(cx - 7, cy + 8))
+            from voice_flow.icons import load as load_icon
+
+            pix = load_icon("pencil", TEXT_SECONDARY, 17)
+            if pix is not None:
+                p.drawPixmap(int(self.width() / 2 - 8.5), int(self.height() / 2 - 8.5), pix)
             p.end()
 
     return PenButtonWidget

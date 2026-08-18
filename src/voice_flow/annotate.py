@@ -159,6 +159,10 @@ def build_annotate_class():
                 | Qt.WindowType.Tool
             )
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            # 18.08 Bastian: "jedes Mal wenn ich auf Annotation druecke, oeffnet
+            # sich wieder Voice Flow". Das Overlay darf die App nicht aktivieren,
+            # sonst holt macOS das minimierte Hauptfenster mit hoch.
+            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
             self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
             # macOS versteckt Tool-Fenster sobald die App inaktiv ist — F6 wird
             # aber IMMER aus einer fremden App heraus gedrueckt. Gleiche Kur wie

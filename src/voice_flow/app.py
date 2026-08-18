@@ -336,9 +336,38 @@ class VoiceFlowApp:
                 self.session = new_session(self.config.sessions_dir, now)
             return self.session
 
+    def _bildschirm_freigabe_ok(self) -> bool:
+        """Vor jedem Screenshot: darf die App ueberhaupt den Bildschirm sehen?
+
+        Fehlt die Freigabe, liefert macOS still ein Bild von Hintergrund und
+        eigenen Fenstern - der Nutzer haelt es fuer einen echten Screenshot.
+        Also lieber laut sagen und die Einstellungen oeffnen.
+        """
+        import sys as _sys
+
+        if _sys.platform != "darwin":
+            return True
+        from voice_flow import darwin_permissions as dp
+
+        if dp.screen_capture_ok():
+            return True
+        log.warning("Bildschirmaufnahme nicht erlaubt - Screenshot zeigt nur den Hintergrund.")
+        if self.overlay:
+            self.overlay.show_info(
+                "Bildschirmaufnahme nicht erlaubt - der Screenshot zeigt nur den "
+                "Hintergrund. Einstellungen sind offen: Haken bei Voice Flow setzen, "
+                "dann App neu starten.",
+                9000,
+            )
+        dp.open_screen_capture_settings()
+        return False
+
     def on_screenshot_hotkey(self) -> None:
         """F7: Monitor unter der Maus grabben, in den Session-Bucket legen, Toast zeigen."""
         from voice_flow.screenshot import grab_monitor_under_cursor
+
+        if not self._bildschirm_freigabe_ok():
+            return
         sess = self._ensure_session()
         try:
             img = grab_monitor_under_cursor()
@@ -397,6 +426,8 @@ class VoiceFlowApp:
                     actions=[("Ordner", lambda d=sess.dir: _open_folder(d))],
                 )
 
+        if not self._bildschirm_freigabe_ok():
+            return
         log.debug("F6: open_annotate wird gerufen (monitor=%s)", mon)
         self.overlay.open_annotate(mon, on_shoot)
 

@@ -76,6 +76,37 @@ def request_screen_capture() -> bool:
         return False
 
 
+def screen_capture_ok() -> bool:
+    """Darf die App den Bildschirm mitlesen? (Nur pruefen, kein Dialog.)
+
+    18.08 Bastian: "es macht Screenshots vom Desktop, nicht von dem, was ich
+    gerade sehe". Ohne diese Freigabe liefert macOS nur den Hintergrund und die
+    eigenen Fenster - ohne Fehler, ohne Hinweis. Deshalb wird vor jedem
+    Screenshot geprueft.
+    """
+    if not _IS_MAC:
+        return True
+    try:
+        from Quartz import CGPreflightScreenCaptureAccess
+
+        return bool(CGPreflightScreenCaptureAccess())
+    except Exception as ex:
+        log.debug("Bildschirm-Freigabe nicht pruefbar: %s", ex)
+        return True
+
+
+def open_screen_capture_settings() -> None:
+    """Systemeinstellungen auf der Seite Bildschirmaufnahme oeffnen."""
+    if not _IS_MAC:
+        return
+    import subprocess
+
+    subprocess.run(
+        ["open",
+         "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"],
+        check=False)
+
+
 def open_accessibility_settings() -> None:
     """Systemeinstellungen direkt auf der Bedienungshilfen-Seite oeffnen."""
     try:
