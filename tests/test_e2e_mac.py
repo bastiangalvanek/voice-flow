@@ -128,3 +128,21 @@ def test_e2e_app_bundle_ist_eigenstaendig():
         return
     pytest.skip("keine installierte Voice Flow.app — auf dem Bau-Rechner normal, "
                 "lokal heisst es: App noch nicht installiert")
+
+
+@pytest.mark.skipif(not MAC, reason="macOS-Berechtigungen")
+def test_start_fragt_nicht_nach_bildschirmaufnahme(monkeypatch):
+    """18.08 Bastian: "andauernd kommt dieser Scheiss, habe schon 1000x genehmigt".
+
+    Der Start darf den System-Dialog NICHT ausloesen — sonst kommt er bei jedem
+    Programmstart erneut. Gefragt wird erst beim ersten Screenshot.
+    """
+    from voice_flow import darwin_permissions as dp
+
+    gefragt = []
+    monkeypatch.setattr(dp, "request_screen_capture", lambda: gefragt.append(True))
+    monkeypatch.setattr(dp, "request_microphone", lambda: None)
+    monkeypatch.setattr(dp, "accessibility_ok", lambda prompt=True: True)
+
+    dp.ensure_all()
+    assert gefragt == [], "ensure_all darf den Bildschirm-Dialog nicht ausloesen"

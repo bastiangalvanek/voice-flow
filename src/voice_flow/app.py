@@ -85,6 +85,8 @@ class VoiceFlowApp:
         # Zeitpunkt kann Voice Flow selbst vorne sein (Klick auf den Modus-Chip)
         # — dann waere die Auto-Erkennung blind. Diese ID ist der Rueckfall.
         self._target_bundle_id: str | None = None
+        # Merker: der System-Dialog zur Bildschirmaufnahme kommt pro Lauf nur einmal.
+        self._bildschirm_dialog_gezeigt = False
 
         # Floating Overlay (Wispr-Style) — laeuft in eigenem Tk-Thread
         self.overlay: RecordingOverlay | None = None
@@ -352,6 +354,11 @@ class VoiceFlowApp:
         if dp.screen_capture_ok():
             return True
         log.warning("Bildschirmaufnahme nicht erlaubt - Screenshot zeigt nur den Hintergrund.")
+        # Den System-Dialog hoechstens EINMAL pro Programmlauf, danach nur noch
+        # den Hinweis. Sonst nervt es bei jedem Tastendruck.
+        if not self._bildschirm_dialog_gezeigt:
+            self._bildschirm_dialog_gezeigt = True
+            dp.request_screen_capture()
         if self.overlay:
             self.overlay.show_info(
                 "Bildschirmaufnahme nicht erlaubt - der Screenshot zeigt nur den "

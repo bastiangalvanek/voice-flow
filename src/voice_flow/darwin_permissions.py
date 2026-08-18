@@ -125,7 +125,12 @@ def ensure_all(notify=None) -> bool:
     if not _IS_MAC:
         return True
     request_microphone()
-    request_screen_capture()
+    # KEIN CGRequestScreenCaptureAccess beim Start: das ist der Dialog "moechte
+    # den Bildschirm aufnehmen", und er kam bei jedem Start erneut. Gefragt wird
+    # erst beim ersten Screenshot (siehe app._bildschirm_freigabe_ok).
+    if not screen_capture_ok():
+        log.info("Bildschirmaufnahme noch nicht erlaubt — es wird beim ersten "
+                 "Screenshot danach gefragt, nicht jetzt.")
     ok = accessibility_ok(prompt=True)
     if not ok:
         msg = (
