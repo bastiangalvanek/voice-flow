@@ -108,31 +108,45 @@ jobs:
           if (-not $lnk) { throw "Startmenue-Eintrag fehlt unter $menue" }
           Write-Host "Startmenue-Eintrag vorhanden: $($lnk[0].FullName)"
 
-      - name: App wirklich starten
+      # Was dieser Schritt beweist und was nicht:
+      #   JA  — die installierte .exe laedt alle Bibliotheken, faehrt hoch,
+      #         registriert die Tasten und meldet sich bereit.
+      #   NEIN — wie das Fenster AUSSIEHT. Der Bau-Rechner hat keinen
+      #         Bildschirm; Qt stuerzt dort beim Zeichnen ab (gemessen:
+      #         0xC0000005 in Qt6Gui.dll). Deshalb laeuft der Test mit
+      #         QT_QPA_PLATFORM=offscreen — Qt rechnet, zeigt aber nichts.
+      #         Das Aussehen wird auf dem Mac von Hand geprueft.
+      - name: App wirklich starten (ohne Bildschirm)
         run: |
           # Ohne Schluessel bricht die App bewusst ab — hier steht ein Platzhalter,
           # es wird nichts an OpenAI geschickt (kein Diktat, kein Netz-Aufruf).
           $env:OPENAI_API_KEY = 'sk-platzhalter-nur-fuer-den-starttest'
-          $env:VOICE_FLOW_LOG_LEVEL = 'DEBUG'
+          $env:QT_QPA_PLATFORM = 'offscreen'
           $exe = Join-Path $env:VF_ZIEL 'VoiceFlow.exe'
-          $p = Start-Process -FilePath $exe -PassThru
-          Start-Sleep -Seconds 40
           $log = Join-Path $env:USERPROFILE '.voice-flow\logs\voice-flow.log'
+          if (Test-Path $log) { Remove-Item $log }
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 45
           if (Test-Path $log) { Write-Host "--- Protokoll ---"; Get-Content $log -Tail 40 }
           if ($p.HasExited) {
             # Bei einem Absturz nennt die Windows-Ereignisanzeige das schuldige
-            # Modul (z.B. Qt6Gui.dll). Ohne das raet man nur.
+            # Modul. Ohne das raet man nur.
             Write-Host "--- Ereignisanzeige ---"
             Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error'} `
-              -MaxEvents 5 -ErrorAction SilentlyContinue |
-              ForEach-Object { $_.Message } | Select-Object -First 40
+              -MaxEvents 3 -ErrorAction SilentlyContinue |
+              ForEach-Object { $_.Message } | Select-Object -First 20
             throw "Voice Flow ist nach dem Start sofort beendet (Code $($p.ExitCode))"
           }
           if (-not (Test-Path $log)) { throw "Die App hat kein Protokoll geschrieben — sie ist nicht hochgekommen" }
           if (-not (Select-String -Path $log -Pattern 'Bereit' -Quiet)) {
             throw "Die App meldet nicht 'Bereit'"
           }
-          Write-Host "Voice Flow laeuft und meldet sich bereit."
+          # Die schwebende Pille ist kein Beiwerk: ohne sie sieht man nicht, dass
+          # aufgenommen wird, und der Modus-Schalter fehlt.
+          if (Select-String -Path $log -Pattern 'Overlay nicht verfuegbar' -Quiet) {
+            throw "Die schwebende Pille kam nicht hoch (Overlay nicht verfuegbar)"
+          }
+          Write-Host "Voice Flow laeuft, meldet sich bereit, Pille ist da."
           Stop-Process -Id $p.Id -Force
 
       - name: Wieder deinstallieren
