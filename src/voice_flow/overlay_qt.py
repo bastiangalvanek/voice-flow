@@ -819,16 +819,6 @@ class RecordingOverlay:
                     on_annotate=self._fire_annotate_click,
                 )
                 self._widget._chip = self._chip
-                screen = QApplication.primaryScreen().availableGeometry()
-                # Zone, in der die Pille im Aufnahme-Zustand erscheint — daran
-                # haengt der Hover im Ruhezustand.
-                self._chip.set_idle_rect((
-                    screen.x() + (screen.width() - _PillWidget.WIDTH_RECORDING) // 2,
-                    screen.y() + screen.height() - _PillWidget.PILL_HEIGHT
-                    - _PillWidget.BOTTOM_OFFSET,
-                    _PillWidget.WIDTH_RECORDING,
-                    _PillWidget.PILL_HEIGHT,
-                ))
                 if self._mode_chip_state is not None:
                     self._chip.sig_set_mode.emit(self._mode_chip_state)
             except Exception as ex:

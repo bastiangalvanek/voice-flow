@@ -211,7 +211,9 @@ def build_control_window_class():
             self._on_device_select = None
             combo.blockSignals(True)
             combo.clear()
-            combo.addItem("Windows-Standard", None)  # None = Auto/Default
+            # 18.08: hiess frueher immer "Windows-Standard" — auf dem Mac schlicht
+            # falsch. None = System-Standard, egal auf welchem System.
+            combo.addItem("System-Standard", None)
             select_row = 0
             for _idx, raw_name in devices:
                 # Anzeige = sauberer Name, gespeichert/gematcht wird der Roh-Name.

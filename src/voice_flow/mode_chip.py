@@ -6,10 +6,9 @@ WindowTransparentForInput (Klicks gehen durch, sonst wuerde sie die App
 blockieren, in die man gerade diktiert). Also ein eigenes, winziges Fenster
 direkt daneben, das Klicks annimmt.
 
-Zwei Wege zum Chip:
-  * waehrend Aufnahme/Verarbeitung ist er automatisch da (Pille ist ja auch da),
-  * im Ruhezustand erscheint er, sobald die Maus in die Pillen-Zone unten in der
-    Mitte fahrt (Hover-Poll per QCursor, kein System-Zugriff noetig).
+Der Chip ist genau dann da, wenn die Pille da ist — also nach F5. Es gab kurz
+eine Hover-Anzeige im Ruhezustand; die ist am 18.08. wieder raus, weil sie beim
+Arbeiten dauernd aufploppte ("der Scheiss ist einfach immer da").
 
 Klick = anderer Modus (Claude Code <-> AI-Web). Der Chip zeigt das Zeichen des
 Ziels: Clawd, das Claude-Code-Maskottchen, bzw. das runde Chrome-Zeichen.
@@ -34,8 +33,6 @@ CHIP_GAP = 8              # Abstand zur Pille
 CHIP_ICON_HEIGHT = 22
 CHIP_ICON_GAP = 8
 CHIP_MIN_WIDTH = 92
-HOVER_POLL_MS = 220
-HOVER_MARGIN = 34         # wie weit um die Pille herum der Hover schon zaehlt
 CLICK_DEBOUNCE_SEC = 0.4  # doppelt zugestellte Klicks zusammenfassen
 # Rechts am Chip sitzt der Stift: klappt die Zeichenleiste auf (statt F6).
 PEN_ZONE_W = 34
@@ -60,7 +57,7 @@ def geometry_beside(pill_rect: tuple[int, int, int, int], chip_width: int,
 def build_mode_chip_class():
     from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal, pyqtSlot
     from PyQt6.QtCore import QPointF
-    from PyQt6.QtGui import (QColor, QCursor, QFont, QFontMetrics, QPainter,
+    from PyQt6.QtGui import (QColor, QFont, QFontMetrics, QPainter,
                              QPainterPath, QPen, QPixmap)
     from PyQt6.QtWidgets import QWidget
 
@@ -78,7 +75,6 @@ def build_mode_chip_class():
             self._mode = ""
             self._icon: QPixmap | None = None
             self._pill_rect: tuple | None = None
-            self._pinned = False   # True = Pille ist sichtbar, Chip bleibt
             self._last_click = 0.0
 
             self.setWindowFlags(
@@ -99,15 +95,6 @@ def build_mode_chip_class():
 
             self.sig_set_mode.connect(self._apply_mode)
             self.sig_place.connect(self._apply_place)
-
-            # Hover-Poll: im Ruhezustand den Chip zeigen, wenn die Maus in die
-            # Pillen-Zone kommt. Billiger als ein globaler Maus-Hook und braucht
-            # keine Bedienungshilfen-Freigabe.
-            self._hover_timer = QTimer(self)
-            self._hover_timer.setInterval(HOVER_POLL_MS)
-            self._hover_timer.timeout.connect(self._poll_hover)
-            self._hover_timer.start()
-            self._idle_rect: tuple | None = None  # wo die Pille erscheinen WUERDE
 
             self.hide()
 
@@ -130,11 +117,9 @@ def build_mode_chip_class():
         def _apply_place(self, pill_rect) -> None:
             """Pille zeigt sich (rect) oder verschwindet (None)."""
             if pill_rect is None:
-                self._pinned = False
                 self.hide()
                 return
             self._pill_rect = tuple(pill_rect)
-            self._pinned = True
             self._move_beside(self._pill_rect)
             self.show()
             self.raise_()
@@ -151,10 +136,6 @@ def build_mode_chip_class():
             return pix.scaledToHeight(CHIP_ICON_HEIGHT,
                                       Qt.TransformationMode.SmoothTransformation)
 
-        def set_idle_rect(self, rect) -> None:
-            """Zone, in der die Pille erscheint — Basis fuer den Hover im Ruhezustand."""
-            self._idle_rect = tuple(rect) if rect else None
-
         def _move_beside(self, pill_rect) -> None:
             from PyQt6.QtWidgets import QApplication
 
@@ -162,31 +143,6 @@ def build_mode_chip_class():
             x, y = geometry_beside(pill_rect, self.width(), CHIP_HEIGHT,
                                    screen_left=screen.x())
             self.move(x, y)
-
-        # ── Hover im Ruhezustand ─────────────────────────────────────
-        def _poll_hover(self) -> None:
-            if self._pinned or self._idle_rect is None:
-                return
-            pos = QCursor.pos()
-            if self._in_hover_zone(pos.x(), pos.y()):
-                if not self.isVisible():
-                    self._pill_rect = self._idle_rect
-                    self._move_beside(self._idle_rect)
-                    self.show()
-                    self.raise_()
-            elif self.isVisible():
-                self.hide()
-
-        def _in_hover_zone(self, x: int, y: int) -> bool:
-            zx, zy, zw, zh = self._idle_rect
-            in_pill_zone = (zx - HOVER_MARGIN <= x <= zx + zw + HOVER_MARGIN
-                            and zy - HOVER_MARGIN <= y <= zy + zh + HOVER_MARGIN)
-            if in_pill_zone:
-                return True
-            # Auf dem Chip selbst bleibt er stehen, sonst flackert er beim Zielen.
-            g = self.geometry()
-            return (g.x() <= x <= g.x() + g.width()
-                    and g.y() <= y <= g.y() + g.height())
 
         # ── Klick ────────────────────────────────────────────────────
         # Kein AppKit-Kunstgriff: Qt.Tool + WA_ShowWithoutActivating stellt den
