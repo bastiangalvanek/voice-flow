@@ -31,6 +31,8 @@ jobs:
         run: PYTHONPATH=src python -m pytest -q
       - name: App bauen
         run: pyinstaller voice-flow.spec --noconfirm --distpath dist --workpath build_tmp/pyi
+      - name: App mit fester Kennung signieren
+        run: bash packaging/sign_macos.sh "dist/Voice Flow.app"
       - name: DMG bauen
         run: bash packaging/make_dmg.sh "${{ github.event.inputs.version || github.ref_name }}"
       - uses: actions/upload-artifact@v4

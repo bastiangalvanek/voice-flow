@@ -13,6 +13,10 @@ DMG="$WURZEL/dist/VoiceFlow-$VERSION-macOS.dmg"
 
 [ -d "$APP" ] || { echo "FEHLER: $APP fehlt — erst 'pyinstaller voice-flow.spec' laufen lassen." >&2; exit 1; }
 
+# Feste Kennung setzen, sonst verliert die App bei jedem Update die
+# macOS-Freigaben (siehe packaging/sign_macos.sh).
+bash "$WURZEL/packaging/sign_macos.sh" "$APP"
+
 rm -rf "$STAGING" "$DMG"
 mkdir -p "$STAGING"
 cp -R "$APP" "$STAGING/"
