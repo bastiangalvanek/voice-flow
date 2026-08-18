@@ -32,7 +32,9 @@ from voice_flow.annotate_toolbar_paint import paint_toolbar
 
 log = logging.getLogger(__name__)
 
-FADE_MS = 3500  # 27.06 Bastian: Striche verblassen, jeder neue Strich resettet den Timer.
+# 18.08 Bastian: "dann hat es jetzt einfach gecleart ohne Grund. Es darf aber
+# erst clearen, wenn ich auf Clear druecke." Der frueher hier stehende
+# Verblass-Timer (3,5 s) ist deshalb ersatzlos raus.
 
 
 # ── Pure Logik (kein Qt) ────────────────────────────────────────────────
@@ -173,10 +175,6 @@ def build_annotate_class():
             self._toolbar: list[ToolbarItem] = build_toolbar(g.width(), g.height())
             self._hover_value = None      # Knopf unter der Maus (fuer den Hover)
 
-            self._fade = QTimer(self)
-            self._fade.setSingleShot(True)
-            self._fade.timeout.connect(self._on_fade)
-            self._fade.start(FADE_MS)
 
             self.show()
             self.raise_()
@@ -190,15 +188,6 @@ def build_annotate_class():
 
         def _width(self) -> int:
             return 5
-
-        def _reset_fade(self) -> None:
-            self._fade.start(FADE_MS)
-
-        def _on_fade(self) -> None:
-            # Striche verblassen, Overlay bleibt offen zum Weiterzeichnen.
-            self._strokes.clear()
-            self._current = None
-            self.update()
 
         # ---- Maus: zeichnen ODER Toolbar bedienen ----
 
@@ -250,7 +239,6 @@ def build_annotate_class():
                 self._strokes.append(self._current)
                 self._redo_stack.clear()   # neuer Strich = Vorwaerts-Weg endet
             self._current = None
-            self._reset_fade()  # mehr zeichnen = laenger sichtbar
             self.update()
 
         def _activate(self, item: ToolbarItem) -> None:
@@ -264,15 +252,12 @@ def build_annotate_class():
             if action == "undo":
                 if self._strokes:
                     self._redo_stack.append(self._strokes.pop())
-                self._reset_fade()
             elif action == "redo":
                 if self._redo_stack:
                     self._strokes.append(self._redo_stack.pop())
-                self._reset_fade()
             elif action == "clear":
                 self._redo_stack.extend(reversed(self._strokes))
                 self._strokes.clear()
-                self._reset_fade()
             elif action == "shoot":
                 self._shoot()
             elif action == "cancel":
@@ -392,7 +377,6 @@ def build_annotate_class():
                           hover_value=self._hover_value)
 
         def closeEvent(self, e):
-            self._fade.stop()
             # Der Bridge melden dass dieses Overlay zu ist (F6-Toggle + saubere Referenz).
             if self._on_close is not None:
                 try:

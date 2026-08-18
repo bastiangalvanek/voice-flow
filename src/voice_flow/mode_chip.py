@@ -34,8 +34,6 @@ CHIP_ICON_HEIGHT = 22
 CHIP_ICON_GAP = 8
 CHIP_MIN_WIDTH = 92
 CLICK_DEBOUNCE_SEC = 0.4  # doppelt zugestellte Klicks zusammenfassen
-# Rechts am Chip sitzt der Stift: klappt die Zeichenleiste auf (statt F6).
-PEN_ZONE_W = 34
 
 
 def geometry_beside(pill_rect: tuple[int, int, int, int], chip_width: int,
@@ -67,10 +65,9 @@ def build_mode_chip_class():
         sig_set_mode = pyqtSignal(str)          # Modus ("claude_code" | "ai_web")
         sig_place = pyqtSignal(object)          # pill_rect oder None (= verstecken)
 
-        def __init__(self, on_click=None, on_annotate=None):
+        def __init__(self, on_click=None):
             super().__init__()
             self._on_click = on_click
-            self._on_annotate = on_annotate
             self._label = ""
             self._mode = ""
             self._icon: QPixmap | None = None
@@ -107,7 +104,7 @@ def build_mode_chip_class():
             icon_breite = self._icon.width() if self._icon else 0
             width = max(CHIP_MIN_WIDTH,
                         CHIP_PADDING_X * 2 + icon_breite + CHIP_ICON_GAP
-                        + self._metrics.horizontalAdvance(self._label)) + PEN_ZONE_W
+                        + self._metrics.horizontalAdvance(self._label))
             self.resize(width, CHIP_HEIGHT)
             if self._pill_rect:
                 self._move_beside(self._pill_rect)
@@ -162,12 +159,9 @@ def build_mode_chip_class():
                 event.accept()
                 return
             self._last_click = now
-            # Rechte Zone = Stift (Zeichenleiste), Rest = Modus umschalten.
-            auf_stift = event.position().x() >= self.width() - PEN_ZONE_W
-            handler = self._on_annotate if auf_stift else self._on_click
             try:
-                if handler is not None:
-                    handler()
+                if self._on_click is not None:
+                    self._on_click()
             except Exception as ex:
                 log.warning("Chip-Klick-Handler-Fehler: %s", ex)
             event.accept()
@@ -191,24 +185,95 @@ def build_mode_chip_class():
             painter.setFont(self._font)
             painter.setPen(QColor(TEXT_SECONDARY))
             painter.drawText(
-                QRectF(x, 0, self.width() - x - PEN_ZONE_W - CHIP_PADDING_X, self.height()),
+                QRectF(x, 0, self.width() - x - CHIP_PADDING_X, self.height()),
                 int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
                 self._label,
             )
 
-            # Stift-Zone rechts: Trennstrich + Stift-Glyph.
-            zone_x = self.width() - PEN_ZONE_W
-            painter.setPen(QPen(QColor(SURFACE_BORDER), 1))
-            painter.drawLine(int(zone_x), 8, int(zone_x), self.height() - 8)
-            self._paint_pen_glyph(painter, zone_x + PEN_ZONE_W / 2, self.height() / 2)
             painter.end()
 
-        def _paint_pen_glyph(self, painter, cx: float, cy: float) -> None:
-            """Kleiner Stift — dasselbe Zeichen, das Lovable fuer Annotation nutzt."""
-            painter.setPen(QPen(QColor(TEXT_SECONDARY), 1.6))
-            painter.drawLine(QPointF(cx - 5, cy + 5), QPointF(cx + 4, cy - 4))
-            painter.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx + 6, cy - 2))
-            painter.drawLine(QPointF(cx + 6, cy - 2), QPointF(cx - 3, cy + 7))
-            painter.drawLine(QPointF(cx - 3, cy + 7), QPointF(cx - 6, cy + 7))
-
     return ModeChipWidget
+
+
+PEN_BUTTON_SIZE = 34
+PEN_BUTTON_GAP = 8
+
+
+def build_pen_button_class():
+    """Runder Stift-Knopf RECHTS neben der Aufnahme-Pille.
+
+    18.08 Bastian: "dieser Stift sollte eigentlich hier sein" — also nicht mehr
+    am Modus-Chip links, sondern direkt rechts am Aufnahme-Knopf. Ein Klick
+    oeffnet die Zeichen-Leiste.
+    """
+    from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal, pyqtSlot
+    from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
+    from PyQt6.QtWidgets import QWidget
+
+    from voice_flow.theme import SURFACE_BASE, SURFACE_BORDER, TEXT_SECONDARY
+
+    class PenButtonWidget(QWidget):
+        sig_place = pyqtSignal(object)      # pill_rect oder None (= verstecken)
+
+        def __init__(self, on_click=None):
+            super().__init__()
+            self._on_click = on_click
+            self._last_click = 0.0
+            self.setWindowFlags(
+                Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.WindowStaysOnTopHint
+                | Qt.WindowType.Tool
+            )
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.resize(PEN_BUTTON_SIZE, PEN_BUTTON_SIZE)
+            self.sig_place.connect(self._apply_place)
+            self.hide()
+
+        @pyqtSlot(object)
+        def _apply_place(self, pill_rect) -> None:
+            if pill_rect is None:
+                self.hide()
+                return
+            px, py, pw, ph = pill_rect
+            self.move(px + pw + PEN_BUTTON_GAP, py + (ph - PEN_BUTTON_SIZE) // 2)
+            self.show()
+            self.raise_()
+
+        def mousePressEvent(self, event) -> None:
+            if event.button() != Qt.MouseButton.LeftButton or self._on_click is None:
+                return
+            now = time.monotonic()
+            if now - self._last_click < CLICK_DEBOUNCE_SEC:
+                event.accept()
+                return
+            self._last_click = now
+            try:
+                self._on_click()
+            except Exception as ex:
+                log.warning("Stift-Knopf-Handler-Fehler: %s", ex)
+            event.accept()
+
+        def paintEvent(self, _event) -> None:
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+            kreis = QPainterPath()
+            kreis.addEllipse(rect)
+            p.fillPath(kreis, QColor(SURFACE_BASE))
+            p.strokePath(kreis, QColor(SURFACE_BORDER))
+
+            stift = QPen(QColor(TEXT_SECONDARY), 1.8)
+            stift.setCapStyle(Qt.PenCapStyle.RoundCap)
+            stift.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(stift)
+            cx, cy = self.width() / 2, self.height() / 2
+            p.drawLine(QPointF(cx - 6, cy + 6), QPointF(cx + 4, cy - 4))
+            p.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx + 6, cy - 2))
+            p.drawLine(QPointF(cx + 6, cy - 2), QPointF(cx - 4, cy + 8))
+            p.drawLine(QPointF(cx - 4, cy + 8), QPointF(cx - 7, cy + 8))
+            p.end()
+
+    return PenButtonWidget

@@ -99,14 +99,22 @@ def _paint_icon(p, name: str, cx: float, cy: float, farbe, qt) -> None:
         p.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx + 6, cy - 2))
         p.drawLine(QPointF(cx + 6, cy - 2), QPointF(cx - 4, cy + 8))
         p.drawLine(QPointF(cx - 4, cy + 8), QPointF(cx - 7, cy + 8))
-    elif name == "undo":
-        p.drawArc(QRectF(cx - 7, cy - 7, 14, 14), 40 * 16, 250 * 16)
-        p.drawLine(QPointF(cx - 7, cy - 3), QPointF(cx - 7, cy - 8))
-        p.drawLine(QPointF(cx - 7, cy - 8), QPointF(cx - 2, cy - 8))
-    elif name == "redo":
-        p.drawArc(QRectF(cx - 7, cy - 7, 14, 14), 290 * 16, 250 * 16)
-        p.drawLine(QPointF(cx + 7, cy - 3), QPointF(cx + 7, cy - 8))
-        p.drawLine(QPointF(cx + 7, cy - 8), QPointF(cx + 2, cy - 8))
+    elif name in ("undo", "redo"):
+        # 18.08 Bastian: "die Zurueck- und Vor-Buttons sind kacke". Jetzt der
+        # uebliche Bogen mit richtiger Pfeilspitze (wie in jeder Zeichen-App):
+        # ein 3/4-Kreis, dessen Ende in eine gefuellte Spitze laeuft.
+        links = name == "undo"
+        r = 7.0
+        start = 150 if links else 30           # Grad, wo der Bogen beginnt
+        p.drawArc(QRectF(cx - r, cy - r + 1, 2 * r, 2 * r),
+                  int(start * 16), int((240 if links else -240) * 16))
+        # Spitze am freien Ende des Bogens.
+        import math as _m
+        winkel = _m.radians(start)
+        ex, ey = cx + r * _m.cos(winkel), cy + 1 - r * _m.sin(winkel)
+        richtung = 1 if links else -1
+        p.drawLine(QPointF(ex, ey), QPointF(ex + 5 * richtung, ey - 1))
+        p.drawLine(QPointF(ex, ey), QPointF(ex + 1 * richtung, ey - 5))
     elif name == "shoot":
         # Kamera: Voice-Flow-eigen, nimmt den Bildschirm mit den Markierungen auf.
         p.drawRoundedRect(QRectF(cx - 8, cy - 5, 16, 12), 2.5, 2.5)

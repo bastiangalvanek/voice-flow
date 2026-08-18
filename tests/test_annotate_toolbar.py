@@ -54,13 +54,28 @@ def test_zurueck_vor_und_clear_sind_tot_ohne_striche():
         assert is_enabled(items[wert], hat_striche=False) is True
 
 
-def test_leiste_liegt_unten_mittig_und_ueber_der_pille():
+def test_leiste_liegt_rechts_neben_der_aufnahme_pille():
+    """18.08 Bastian: "das soll rechts neben dem Aufnahme-Button sein"."""
+    from voice_flow.theme import pill_rect_on
+
     items = _layout()
     assert len({it.y for it in items}) == 1, "alle Knoepfe auf einer Hoehe"
+    px, py, pw, ph = pill_rect_on(1470, 956)
     left, top, width, height = pill_rect(items)
-    assert abs((left + width / 2) - 735) < 2, "nicht mittig"
+    assert left > px + pw, "Leiste beginnt erst rechts von der Pille"
+    assert left - (px + pw) < 30, "aber direkt daneben, nicht irgendwo"
     assert height == BAR_HEIGHT
-    assert 956 - (top + height) > 60, "muss ueber der Aufnahme-Pille bleiben"
+    # Auf gleicher Hoehe wie die Pille (Mitte auf Mitte, ein paar Pixel Toleranz).
+    assert abs((top + height / 2) - (py + ph / 2)) <= 2
+    assert left + width <= 1470, "darf nicht aus dem Bild laufen"
+
+
+def test_leiste_weicht_nach_unten_mittig_aus_wenn_rechts_kein_platz_ist():
+    items = build_toolbar(viewport_w=1000, viewport_h=700)
+    px, py, pw, ph = __import__("voice_flow.theme", fromlist=["x"]).pill_rect_on(1000, 700)
+    left, top, width, height = pill_rect(items)
+    assert left >= 0 and left + width <= 1000
+    assert top + height <= py, "dann sitzt sie ueber der Pille"
 
 
 def test_treffer_auf_knopf_und_daneben():

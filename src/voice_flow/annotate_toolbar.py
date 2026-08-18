@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from voice_flow.theme import PILL_HEIGHT, pill_rect_on
+
 # Lovable zeichnet in Rot. Eine Farbe, keine Auswahl.
 STROKE_COLOR: tuple[int, int, int] = (255, 69, 58)
 
@@ -28,7 +30,7 @@ PAD_X = 10               # Innen-Polster links/rechts in der Leiste
 GAP = 4                  # Abstand zwischen Knoepfen
 SEP_GAP = 14             # Abstand an einer Gruppengrenze
 LABEL_PAD = 14           # Polster links/rechts um eine Beschriftung
-BOTTOM_OFFSET = 96       # Abstand der Leisten-Unterkante vom Bildschirmrand
+GAP_TO_PILL = 10         # Abstand zwischen Aufnahme-Pille und Leiste
 CHAR_W = 7.2             # grobe Zeichenbreite fuer die Breitenrechnung
 
 
@@ -74,16 +76,25 @@ def _item_width(spec: dict) -> int:
     return breite
 
 
-def build_toolbar(viewport_w: int, viewport_h: int,
-                  bottom_offset: int = BOTTOM_OFFSET) -> list[ToolbarItem]:
-    """Knoepfe nebeneinander, unten mittig — dort, wo auch die Pille sitzt."""
+def build_toolbar(viewport_w: int, viewport_h: int) -> list[ToolbarItem]:
+    """Knoepfe nebeneinander, RECHTS neben der Aufnahme-Pille.
+
+    18.08 Bastian: "dann kommt es hier drunter, das soll rechts neben dem
+    Aufnahme-Button sein". Passt die Leiste rechts nicht mehr aufs Bild, weicht
+    sie nach unten-mittig aus, statt aus dem Bildschirm zu laufen.
+    """
     breiten = [_item_width(spec) for spec in _SPEC]
     gesamt = sum(breiten)
     for i, spec in enumerate(_SPEC):
         if i > 0:
             gesamt += SEP_GAP if spec.get("separator_before") else GAP
-    start_x = max(PAD_X, (viewport_w - gesamt) // 2)
-    y = max(PAD_X, viewport_h - bottom_offset - BTN_H)
+
+    px, py, pw, ph = pill_rect_on(viewport_w, viewport_h)
+    start_x = px + pw + GAP_TO_PILL + PAD_X
+    y = py + (ph - BTN_H) // 2
+    if start_x + gesamt + PAD_X > viewport_w:      # kein Platz rechts
+        start_x = max(PAD_X, (viewport_w - gesamt) // 2)
+        y = max(PAD_X, py - PILL_HEIGHT - 28)
 
     items: list[ToolbarItem] = []
     x = start_x
