@@ -113,12 +113,21 @@ jobs:
           # Ohne Schluessel bricht die App bewusst ab — hier steht ein Platzhalter,
           # es wird nichts an OpenAI geschickt (kein Diktat, kein Netz-Aufruf).
           $env:OPENAI_API_KEY = 'sk-platzhalter-nur-fuer-den-starttest'
+          $env:VOICE_FLOW_LOG_LEVEL = 'DEBUG'
           $exe = Join-Path $env:VF_ZIEL 'VoiceFlow.exe'
           $p = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 40
           $log = Join-Path $env:USERPROFILE '.voice-flow\logs\voice-flow.log'
-          if (Test-Path $log) { Write-Host "--- Protokoll ---"; Get-Content $log -Tail 30 }
-          if ($p.HasExited) { throw "Voice Flow ist nach dem Start sofort beendet (Code $($p.ExitCode))" }
+          if (Test-Path $log) { Write-Host "--- Protokoll ---"; Get-Content $log -Tail 40 }
+          if ($p.HasExited) {
+            # Bei einem Absturz nennt die Windows-Ereignisanzeige das schuldige
+            # Modul (z.B. Qt6Gui.dll). Ohne das raet man nur.
+            Write-Host "--- Ereignisanzeige ---"
+            Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error'} `
+              -MaxEvents 5 -ErrorAction SilentlyContinue |
+              ForEach-Object { $_.Message } | Select-Object -First 40
+            throw "Voice Flow ist nach dem Start sofort beendet (Code $($p.ExitCode))"
+          }
           if (-not (Test-Path $log)) { throw "Die App hat kein Protokoll geschrieben — sie ist nicht hochgekommen" }
           if (-not (Select-String -Path $log -Pattern 'Bereit' -Quiet)) {
             throw "Die App meldet nicht 'Bereit'"
