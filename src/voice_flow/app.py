@@ -420,6 +420,9 @@ class VoiceFlowApp:
         shoot_offset = self._capture_offset()
 
         def on_shoot(img) -> None:
+            # Erst hier zaehlt die Freigabe: ohne sie waere das Bild leer.
+            if not self._bildschirm_freigabe_ok():
+                return
             try:
                 path = sess.add_screenshot(img, offset=shoot_offset)
             except Exception as ex:
@@ -433,8 +436,6 @@ class VoiceFlowApp:
                     actions=[("Ordner", lambda d=sess.dir: _open_folder(d))],
                 )
 
-        if not self._bildschirm_freigabe_ok():
-            return
         log.debug("F6: open_annotate wird gerufen (monitor=%s)", mon)
         self.overlay.open_annotate(mon, on_shoot)
 
