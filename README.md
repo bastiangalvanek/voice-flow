@@ -1,8 +1,43 @@
 # Voice Flow — Galvanek Edition
 
-Push-to-Talk Diktat-Tool fuer Windows. **F8 halten**, sprechen, loslassen — Text landet im aktiven Fenster (Gmail, ClickUp, Word, Browser, egal).
+Diktat-Werkzeug fuer **macOS und Windows**. Taste druecken, sprechen, Taste
+druecken — der Text landet dort, wo der Cursor steht (Gmail, ClickUp, Word,
+Browser, Claude Code, egal). Screenshots gehen mit: als Dateipfad fuer Claude
+Code oder als echte Bilder fuers Web.
 
-**Stack:** OpenAI Whisper (Transcription) + Claude Haiku 4.5 (Cleanup mit Galvanek-Vokabular).
+**Technik:** OpenAI Whisper (Verschriftung) + Claude Haiku 4.5 (Nachbearbeitung
+mit Galvanek-Vokabular).
+
+---
+
+## Fertiges Programm laden
+
+Kein Python, kein Terminal, keine Einrichtung — beide Fassungen liegen als
+fertiges Installationsprogramm bereit:
+
+**[→ Aktuelle Version herunterladen](https://github.com/bastiangalvanek/voice-flow/releases/latest)**
+
+| Betriebssystem | Datei | Anleitung |
+|---|---|---|
+| **macOS** (Apple Silicon) | `VoiceFlow-vX.Y.Z-macOS.dmg` | **[Anleitung Mac](docs/ANLEITUNG-MAC.md)** |
+| **Windows 10/11** | `VoiceFlow-X.Y.Z-Setup.exe` | **[Anleitung Windows](docs/ANLEITUNG-WINDOWS.md)** |
+| Windows ohne Installation | `VoiceFlow-X.Y.Z-Windows.zip` | entpacken, `VoiceFlow.exe` starten |
+
+In keinem Download steckt ein API-Schluessel — den traegt jeder selbst ein
+(steht in beiden Anleitungen, eine Zeile).
+
+Jede Version wird vor der Veroeffentlichung geprueft: Tests auf beiden
+Systemen, und unter Windows wird das Installationsprogramm auf einer echten
+Windows-Maschine **wirklich installiert, gestartet und wieder entfernt**.
+Schlaegt einer dieser Schritte fehl, erscheint die Version gar nicht erst.
+
+### Tasten
+
+| macOS | Windows | Was |
+|---|---|---|
+| F5 | F8 | Aufnahme starten / stoppen |
+| F3 | F7 | Screenshot vom Bildschirm unter der Maus |
+| F6 | F6 | Markieren: zeichnen, dann fotografieren |
 
 ---
 

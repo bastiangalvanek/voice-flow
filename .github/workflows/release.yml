@@ -67,6 +67,75 @@ jobs:
           $version = ("${{ github.event.inputs.version || github.ref_name }}") -replace '^v',''
           choco install innosetup --no-progress -y
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyVersion=$version packaging\windows-installer.iss
+      # 19.08 Bastian: "kannst du Windows-Installer dennoch irgendwie pruefen".
+      # Kann man: auf einer echten Windows-Maschine von GitHub, ohne eigenen PC.
+      # Das Installationsprogramm wird wirklich installiert, die App gestartet,
+      # danach wieder sauber entfernt. Schlaegt ein Schritt fehl, wird das
+      # Release rot — ein kaputtes Setup kommt gar nicht erst online.
+      - name: Installation wirklich durchfuehren
+        run: |
+          $setup = (Get-ChildItem dist\*Setup.exe | Select-Object -First 1).FullName
+          Write-Host "Installiere $setup"
+          $p = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList `
+               '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/LOG=install.log'
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 40; throw "Setup endete mit $($p.ExitCode)" }
+
+          # PrivilegesRequired=lowest -> Installation im Benutzerordner.
+          $ziel = Join-Path $env:LOCALAPPDATA 'Programs\Voice Flow'
+          if (-not (Test-Path $ziel)) { $ziel = 'C:\Program Files\Voice Flow' }
+          if (-not (Test-Path $ziel)) { Get-Content install.log -Tail 40; throw "Kein Installationsordner gefunden" }
+          echo "VF_ZIEL=$ziel" >> $env:GITHUB_ENV
+          Write-Host "Installiert nach $ziel"
+
+          # Die Teile, ohne die die App nicht das ist, was Bastian benutzt.
+          # Rekursiv gesucht, damit ein anderer Unterordner-Aufbau (PyInstaller
+          # legt seit Fassung 6 alles unter _internal) den Test nicht falsch
+          # rot macht.
+          $pflicht = @('VoiceFlow.exe', 'unins000.exe',
+                       'mode_claude_code.png', 'mode_ai_web.png', 'logo.png')
+          $fehlend = $pflicht | Where-Object {
+            -not (Get-ChildItem $ziel -Recurse -Filter $_ -ErrorAction SilentlyContinue)
+          }
+          if ($fehlend) {
+            Get-ChildItem $ziel -Recurse -Name | Select-Object -First 60
+            throw "Im Installationsordner fehlen: $($fehlend -join ', ')"
+          }
+          Write-Host "Alle Pflicht-Dateien vorhanden (inkl. Clawd- und Chrome-Zeichen)."
+
+          # Startmenue-Eintrag: sonst findet niemand die App.
+          $menue = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+          $lnk = Get-ChildItem $menue -Recurse -Filter 'Voice Flow.lnk' -ErrorAction SilentlyContinue
+          if (-not $lnk) { throw "Startmenue-Eintrag fehlt unter $menue" }
+          Write-Host "Startmenue-Eintrag vorhanden: $($lnk[0].FullName)"
+
+      - name: App wirklich starten
+        run: |
+          # Ohne Schluessel bricht die App bewusst ab — hier steht ein Platzhalter,
+          # es wird nichts an OpenAI geschickt (kein Diktat, kein Netz-Aufruf).
+          $env:OPENAI_API_KEY = 'sk-platzhalter-nur-fuer-den-starttest'
+          $exe = Join-Path $env:VF_ZIEL 'VoiceFlow.exe'
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 40
+          $log = Join-Path $env:USERPROFILE '.voice-flow\logs\voice-flow.log'
+          if (Test-Path $log) { Write-Host "--- Protokoll ---"; Get-Content $log -Tail 30 }
+          if ($p.HasExited) { throw "Voice Flow ist nach dem Start sofort beendet (Code $($p.ExitCode))" }
+          if (-not (Test-Path $log)) { throw "Die App hat kein Protokoll geschrieben — sie ist nicht hochgekommen" }
+          if (-not (Select-String -Path $log -Pattern 'Bereit' -Quiet)) {
+            throw "Die App meldet nicht 'Bereit'"
+          }
+          Write-Host "Voice Flow laeuft und meldet sich bereit."
+          Stop-Process -Id $p.Id -Force
+
+      - name: Wieder deinstallieren
+        run: |
+          $unins = Join-Path $env:VF_ZIEL 'unins000.exe'
+          Start-Process -FilePath $unins -Wait -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'
+          Start-Sleep -Seconds 5
+          if (Test-Path (Join-Path $env:VF_ZIEL 'VoiceFlow.exe')) {
+            throw "Deinstallation hat das Programm nicht entfernt"
+          }
+          Write-Host "Deinstallation sauber."
+
       - name: ZIP als zweite Variante packen
         run: |
           $version = "${{ github.event.inputs.version || github.ref_name }}"
