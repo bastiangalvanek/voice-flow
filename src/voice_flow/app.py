@@ -14,7 +14,7 @@ from voice_flow.paste import paste_files_to_active_window, paste_to_active_windo
 from voice_flow.recording_storage import (
     RECORDINGS_DIR,
     archive_recording,
-    list_pending_recordings,
+    list_pending_with_audio,
     mark_failed,
     mark_suspect,
     save_recording,
@@ -202,7 +202,14 @@ class VoiceFlowApp:
             self._tray_set("recording")
             # 18.08: Ziel-App merken, BEVOR die Pille kommt — danach zeigt der
             # Chip an der Pille, wohin dieses Diktat geht (Pfade oder Bilder).
-            self._target_bundle_id = target_mode.frontmost_bundle_id()
+            vorne = target_mode.frontmost_bundle_id()
+            # War Voice Flow selbst vorne (Klick auf Chip, Stift oder Fenster),
+            # darf es sich NICHT als Ziel merken: am Ende des Diktats wuerde es
+            # sich sonst selbst nach vorne holen — und macOS klappt dabei das
+            # minimierte Fenster wieder auf.
+            # 19.08 Bastian: "wenn ich es minimiere, soll es minimiert bleiben".
+            self._target_bundle_id = target_mode.ziel_merken(
+                vorne, target_mode.own_bundle_id())
             if self.overlay:
                 self.overlay.show_recording()
                 self._refresh_mode_chip()
@@ -354,19 +361,20 @@ class VoiceFlowApp:
         if dp.screen_capture_ok():
             return True
         log.warning("Bildschirmaufnahme nicht erlaubt - Screenshot zeigt nur den Hintergrund.")
-        # Den System-Dialog hoechstens EINMAL pro Programmlauf, danach nur noch
-        # den Hinweis. Sonst nervt es bei jedem Tastendruck.
-        if not self._bildschirm_dialog_gezeigt:
-            self._bildschirm_dialog_gezeigt = True
-            dp.request_screen_capture()
+        # 19.08 Bastian: "bei jedem F5/F3 kommt das Fenster hoch obwohl ich es
+        # minimiert habe". Ursache war genau hier: open_screen_capture_settings()
+        # bei JEDEM Tastendruck. Das oeffnet nicht nur die Systemeinstellungen,
+        # es AKTIVIERT dabei auch Voice Flow — und macOS holt ein minimiertes
+        # Fenster wieder hervor.
+        # Ab jetzt: nur ein Hinweis in der Pille. Weder Systemeinstellungen noch
+        # System-Dialog werden aus einem Tastendruck heraus geoeffnet. Freigeben
+        # laeuft ausschliesslich ueber den Knopf im Voice-Flow-Fenster.
         if self.overlay:
             self.overlay.show_info(
-                "Bildschirmaufnahme nicht erlaubt - der Screenshot zeigt nur den "
-                "Hintergrund. Einstellungen sind offen: Haken bei Voice Flow setzen, "
-                "dann App neu starten.",
-                9000,
+                "Bildschirmaufnahme nicht erlaubt — im Voice-Flow-Fenster auf "
+                "\u201eFreigabe reparieren\u201c druecken.",
+                6000,
             )
-        dp.open_screen_capture_settings()
         return False
 
     def on_screenshot_hotkey(self) -> None:
@@ -394,6 +402,20 @@ class VoiceFlowApp:
                 thumbnail_path=str(path),
                 actions=[("Ordner", lambda d=sess.dir: _open_folder(d))],
             )
+
+    def on_escape(self) -> None:
+        """ESC: nur die Zeichen-Ebene schliessen, sonst nichts.
+
+        Der Listener beobachtet ESC bloss (suppress=False) — ESC wirkt in jeder
+        anderen App unveraendert weiter.
+        """
+        if not self.overlay:
+            return
+        try:
+            if self.overlay.close_annotate():
+                log.debug("ESC: Zeichen-Ebene geschlossen.")
+        except Exception as ex:
+            log.debug("ESC-Behandlung fehlgeschlagen: %s", ex)
 
     def on_annotate_hotkey(self) -> None:
         """F6: Loom-Zeichen-Overlay auf dem Monitor unter der Maus oeffnen.
@@ -686,7 +708,7 @@ class VoiceFlowApp:
         if not self.overlay:
             return
         try:
-            pending = list_pending_recordings()
+            pending = list_pending_with_audio()
         except Exception as ex:  # noqa: BLE001 - Hinweis darf den Start nie kippen
             log.debug("Pending-Pruefung fehlgeschlagen: %s", ex)
             return

@@ -128,6 +128,41 @@ def recover_file(path: Path, transcriber: Transcriber, cfg: Config) -> str:
     return woven
 
 
+def nachholen(fortschritt=None) -> tuple[int, int]:
+    """Alle liegengebliebenen Aufnahmen verschriften. Fuer den Knopf im Fenster.
+
+    Bewusst NICHT main(): main() ruft logging.basicConfig (wuerde die
+    Protokollierung der laufenden App umstellen) und legt am Ende den letzten
+    Text in die Zwischenablage — das wuerde Bastian mitten im Arbeiten das
+    Kopierte wegnehmen.
+
+    fortschritt: optionales Callback(fertig, gesamt) fuer die Beschriftung.
+    Rueckgabe: (geschafft, fehlgeschlagen)
+    """
+    ziele = find_recoverable()
+    if not ziele:
+        return (0, 0)
+    config = load_config()
+    transcriber = Transcriber(api_key=config.openai_api_key,
+                              model=config.whisper_model)
+    geschafft = fehler = 0
+    for i, pfad in enumerate(ziele, start=1):
+        try:
+            if recover_file(pfad, transcriber, config):
+                geschafft += 1
+            else:
+                fehler += 1
+        except Exception as ex:  # noqa: BLE001 - eine kaputte Datei stoppt den Rest nicht
+            log.error("RECOVER  %s fehlgeschlagen: %s", pfad.name, ex)
+            fehler += 1
+        if fortschritt is not None:
+            try:
+                fortschritt(i, len(ziele))
+            except Exception:
+                pass
+    return (geschafft, fehler)
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
     args = list(sys.argv[1:] if argv is None else argv)

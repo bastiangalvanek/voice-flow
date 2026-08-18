@@ -65,6 +65,19 @@ def own_bundle_id() -> str | None:
         return None
 
 
+def ziel_merken(vorne: str | None, eigen: str | None) -> str | None:
+    """Welche App bekommt das Diktat? None = keine fremde App im Vordergrund.
+
+    War Voice Flow selbst vorne (Klick auf Chip, Stift oder Fenster), darf es
+    sich nicht als Ziel merken — sonst holt es sich am Ende des Diktats selbst
+    nach vorne und macOS klappt dabei das minimierte Fenster wieder auf
+    (gemessen 19.08.: "nach F5 Stopp: Voice Flow=false").
+    """
+    if eigen and vorne == eigen:
+        return None
+    return vorne
+
+
 def activate_bundle_id(bundle_id: str | None) -> bool:
     """Holt die Ziel-App wieder nach vorne (nach einem Klick auf den Modus-Chip).
 

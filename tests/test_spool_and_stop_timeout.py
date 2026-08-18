@@ -234,7 +234,7 @@ def _app_with_overlay(monkeypatch, tmp_path):
     """VoiceFlowApp ohne __init__ (kein Mikro/kein Netz) — nur die Hinweis-Logik."""
     import voice_flow.app as app_mod
 
-    monkeypatch.setattr(app_mod, "list_pending_recordings", lambda: sorted(
+    monkeypatch.setattr(app_mod, "list_pending_with_audio", lambda: sorted(
         tmp_path.glob("recording_*.wav")))
     app = object.__new__(app_mod.VoiceFlowApp)
     app.overlay = _FakeOverlay()

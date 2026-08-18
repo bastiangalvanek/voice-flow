@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +129,8 @@ def ensure_all(notify=None) -> bool:
     # KEIN CGRequestScreenCaptureAccess beim Start: das ist der Dialog "moechte
     # den Bildschirm aufnehmen", und er kam bei jedem Start erneut. Gefragt wird
     # erst beim ersten Screenshot (siehe app._bildschirm_freigabe_ok).
+    heile_alte_bildschirm_freigabe()
+    # Zustand NACH der Bereinigung genau einmal ablesen und melden.
     if not screen_capture_ok():
         log.info("Bildschirmaufnahme noch nicht erlaubt — es wird beim ersten "
                  "Screenshot danach gefragt, nicht jetzt.")
@@ -144,5 +147,110 @@ def ensure_all(notify=None) -> bool:
                 notify(msg)
             except Exception:
                 pass
-        open_accessibility_settings()
+        # KEIN open_accessibility_settings() mehr: der System-Dialog von
+        # accessibility_ok(prompt=True) reicht, und der Status steht dauerhaft
+        # im Voice-Flow-Fenster. Zwei aufspringende Fenster beim Start waren der
+        # Grund fuer "andauernd muckt das System" (Bastian, 19.08.).
     return ok
+
+
+# ── Status + Reparatur ───────────────────────────────────────────────
+# 19.08 Bastian: "einen Button, wo ich sehe: ist es da, ja oder nein".
+# Statt Dialoge zu feuern, wird der Zustand ANGEZEIGT und nur auf Knopfdruck
+# repariert.
+
+def microphone_ok() -> bool:
+    """Mikrofon erteilt? Nur pruefen, kein Dialog."""
+    if not _IS_MAC:
+        return True
+    try:
+        from AVFoundation import AVCaptureDevice
+
+        # 3 = AVAuthorizationStatusAuthorized
+        return int(AVCaptureDevice.authorizationStatusForMediaType_("soun")) == 3
+    except Exception as ex:
+        log.debug("Mikrofon-Status nicht pruefbar: %s", ex)
+        return True
+
+
+def permission_status() -> dict[str, bool]:
+    """Alle drei Freigaben auf einen Blick — fuer die Anzeige im Fenster."""
+    if not _IS_MAC:
+        return {"microphone": True, "accessibility": True, "screen": True}
+    return {
+        "microphone": microphone_ok(),
+        # prompt=False: reines Ablesen, sonst springt beim Aufklappen ein Dialog auf.
+        "accessibility": accessibility_ok(prompt=False),
+        "screen": screen_capture_ok(),
+    }
+
+
+BUNDLE_ID = "de.galvanek.voiceflow"
+
+
+def repair_screen_capture(bundle_id: str = BUNDLE_ID) -> bool:
+    """Verwaisten Bildschirm-Eintrag loeschen, damit macOS neu fragen kann.
+
+    Der Grund (gemessen 19.08.): In der Liste "Aufnahme von Bildschirm &
+    Systemaudio" stand "Voice Flow" mit AKTIVEM Schalter — die App bekam
+    trotzdem nichts. Der Eintrag gehoerte zu einer aelteren Programmfassung.
+    Ein sichtbarer Haken ist also kein Beweis fuer eine gueltige Freigabe.
+
+    'tccutil reset' loescht den toten Eintrag; danach fragt macOS beim naechsten
+    Screenshot wieder frisch. Braucht kein Administrator-Passwort.
+    """
+    if not _IS_MAC:
+        return True
+    try:
+        r = subprocess.run(["tccutil", "reset", "ScreenCapture", bundle_id],
+                           capture_output=True, text=True, timeout=15)
+        log.info("tccutil reset ScreenCapture: rc=%s %s", r.returncode,
+                 (r.stdout or r.stderr).strip())
+        return r.returncode == 0
+    except Exception as ex:
+        log.warning("tccutil nicht ausfuehrbar: %s", ex)
+        return False
+
+
+# Einmalige Selbstheilung: tote Freigabe aus der Zeit vor dem Signatur-Fix.
+_MARKER = Path.home() / ".voice-flow" / "state" / "screen_grant_cleaned"
+
+
+def heile_alte_bildschirm_freigabe() -> bool:
+    """Loescht EINMAL pro Rechner einen wirkungslosen Bildschirm-Eintrag.
+
+    Vorgeschichte (19.08.): In den Systemeinstellungen stand "Voice Flow" mit
+    aktivem Schalter, die App bekam trotzdem kein Bild. Der Eintrag war vor dem
+    Signatur-Fix vom 18.08. erteilt worden und damit an die damalige Pruefsumme
+    gebunden — jeder Neubau machte ihn ungueltig, ohne dass der Haken verschwand.
+    Ein sichtbarer Haken ist deshalb kein Beweis fuer eine gueltige Freigabe.
+
+    Seit dem Fix ist die Identitaet fest (designated => identifier). Eine ab
+    jetzt erteilte Freigabe ueberlebt Updates — so wie es die Bedienungshilfen
+    seither nachweislich tun. Nur der Altbestand muss einmal weg.
+
+    Absicherung gegen Selbstschaden: Es wird ausschliesslich aufgeraeumt, wenn
+    die Freigabe ohnehin nicht wirkt (Preflight False). Eine funktionierende
+    Freigabe kann dieser Weg nicht loeschen. Danach nie wieder (Merker).
+    """
+    if not _IS_MAC:
+        return False
+    if _MARKER.exists():
+        return False
+    if screen_capture_ok():
+        # Freigabe wirkt — nichts anzufassen, aber als erledigt vermerken.
+        _marker_setzen()
+        return False
+    log.info("Einmalige Bereinigung: wirkungslose Bildschirm-Freigabe wird "
+             "geloescht, damit macOS neu fragen kann.")
+    ok = repair_screen_capture()
+    _marker_setzen()
+    return ok
+
+
+def _marker_setzen() -> None:
+    try:
+        _MARKER.parent.mkdir(parents=True, exist_ok=True)
+        _MARKER.write_text("erledigt\n")
+    except Exception as ex:
+        log.debug("Merker nicht schreibbar: %s", ex)

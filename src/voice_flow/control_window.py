@@ -52,6 +52,15 @@ _QSS = """
     selection-background-color: #2A2A33; outline: none;
 }
 #hint { color: #5C5C66; font-size: 11px; }
+#healthLabel { color: #9B9BA3; font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
+#healthName { color: #C9C9D1; font-size: 12px; }
+#healthValOk { color: #34D399; font-size: 12px; font-weight: 700; }
+#healthValBad { color: #FF6B61; font-size: 12px; font-weight: 700; }
+#healthFix {
+    background: #1A1A20; color: #E6E6EA; border: 1px solid #3A3A45;
+    border-radius: 8px; padding: 8px; font-size: 12px; font-weight: 600;
+}
+#healthFix:hover { border-color: #FFB340; color: #FFD08A; }
 #signature { color: #6E6E7A; font-size: 11px; font-weight: 600; letter-spacing: 0.2px; padding-top: 2px; }
 #quit {
     background: #1B1216; color: #FF6B61; border: 1px solid #3A2429;
@@ -72,6 +81,9 @@ def build_control_window_class():
         sig_status = pyqtSignal(str)
         sig_show = pyqtSignal()
         sig_devices = pyqtSignal(object)  # payload: (devices, selected_name, on_select)
+        # Beschriftung des Nachhol-Knopfs aus dem Arbeits-Thread. Qt-Widgets
+        # duerfen NUR im Qt-Thread angefasst werden — sonst Absturz.
+        sig_recover_text = pyqtSignal(str, bool)  # (Text, wieder klickbar)
 
         def __init__(self, on_quit, hotkey_label: str = "F5" if sys.platform == "darwin" else "F8"):
             super().__init__()
@@ -80,8 +92,9 @@ def build_control_window_class():
             self.setObjectName("root")
             self.setWindowTitle("Voice Flow")
             # 27.06: dritte Hotkey-Zeile (F6) -> +28px. + Mikrofon-Picker -> +62px.
-            self.setMinimumSize(390, 396)   # +24px fuer die Signatur-Zeile
-            self.resize(390, 396)
+            # +170px fuer das Feld "Freigaben & Transkripte" (19.08.).
+            self.setMinimumSize(390, 566)
+            self.resize(390, 566)
 
             logo = resolve_logo_path()
             # Taskleisten-Button: scharfe .ico bevorzugen, sonst logo.png.
@@ -145,6 +158,13 @@ def build_control_window_class():
             mic_col.addWidget(self._mic_combo)
             root.addLayout(mic_col)
 
+            # 19.08 Bastian: "einen Button, wo ich sehe: ist Transkript da, ja
+            # oder nein — aehnlich wie im Bereich Videos". Und: "fixe die ganze
+            # Kacke, dass das nicht andauernd wieder kommt". Beides loest dieses
+            # Feld: der Zustand steht dauerhaft da, statt dass Dialoge aufpoppen.
+            root.addLayout(self._build_health(
+                QLabel, QFrame, QHBoxLayout, QVBoxLayout, QPushButton, Qt))
+
             root.addStretch(1)
 
             # Beenden-Button
@@ -169,12 +189,160 @@ def build_control_window_class():
             self.sig_status.connect(self._apply_status)
             self.sig_show.connect(self._do_show)
             self.sig_devices.connect(self._apply_devices)
+            self.sig_recover_text.connect(self._apply_recover_text)
             self._apply_status("idle")
 
         def _do_show(self) -> None:
             self.show()
             self.raise_()
             self.activateWindow()
+
+        # ── Freigaben & Transkripte ──────────────────────────────────
+        def _build_health(self, QLabel, QFrame, QHBoxLayout, QVBoxLayout,
+                          QPushButton, Qt):
+            from PyQt6.QtCore import QTimer
+
+            col = QVBoxLayout()
+            col.setSpacing(7)
+            titel = QLabel("FREIGABEN & TRANSKRIPTE")
+            titel.setObjectName("healthLabel")
+            col.addWidget(titel)
+
+            self._health_rows = {}
+            for schluessel, name in (("microphone", "Mikrofon"),
+                                     ("accessibility", "Bedienungshilfen"),
+                                     ("screen", "Bildschirmaufnahme"),
+                                     ("transcripts", "Transkripte")):
+                row = QHBoxLayout()
+                row.setSpacing(9)
+                punkt = QFrame()
+                punkt.setFixedSize(9, 9)
+                bez = QLabel(name)
+                bez.setObjectName("healthName")
+                wert = QLabel("…")
+                row.addWidget(punkt)
+                row.addWidget(bez)
+                row.addStretch(1)
+                row.addWidget(wert)
+                col.addLayout(row)
+                self._health_rows[schluessel] = (punkt, wert)
+
+            self._fix_screen = QPushButton("Bildschirm-Freigabe reparieren")
+            self._fix_screen.setObjectName("healthFix")
+            self._fix_screen.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._fix_screen.clicked.connect(self._on_fix_screen)
+            self._fix_screen.setVisible(False)
+            col.addWidget(self._fix_screen)
+
+            self._fix_transcripts = QPushButton("Fehlende Transkripte nachholen")
+            self._fix_transcripts.setObjectName("healthFix")
+            self._fix_transcripts.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._fix_transcripts.clicked.connect(self._on_fix_transcripts)
+            self._fix_transcripts.setVisible(False)
+            col.addWidget(self._fix_transcripts)
+
+            # Alle 2,5 s nachsehen: gibt Bastian eine Freigabe im System frei,
+            # springt die Zeile hier von selbst auf gruen — ohne Neustart, ohne
+            # dass er raten muss, ob es gewirkt hat.
+            self._health_timer = QTimer(self)
+            self._health_timer.timeout.connect(self._refresh_health)
+            self._health_timer.start(2500)
+            self._refresh_health()
+            return col
+
+        def _refresh_health(self) -> None:
+            try:
+                from voice_flow import darwin_permissions as dp
+
+                status = dp.permission_status()
+            except Exception as ex:
+                log.debug("Freigabe-Status nicht lesbar: %s", ex)
+                status = {}
+
+            for schluessel, text_ok, text_bad in (
+                ("microphone", "Da", "Fehlt"),
+                ("accessibility", "Da", "Fehlt"),
+                ("screen", "Da", "Fehlt"),
+            ):
+                self._set_health(schluessel, status.get(schluessel, True),
+                                 text_ok, text_bad)
+            self._fix_screen.setVisible(not status.get("screen", True))
+
+            offen = self._offene_transkripte()
+            self._set_health("transcripts", offen == 0, "Alle da",
+                             f"{offen} ohne Text")
+            self._fix_transcripts.setVisible(offen > 0)
+
+        def _set_health(self, schluessel: str, ok: bool, text_ok: str,
+                        text_bad: str) -> None:
+            eintrag = self._health_rows.get(schluessel)
+            if eintrag is None:
+                return
+            punkt, wert = eintrag
+            farbe = "#34D399" if ok else "#FF6B61"
+            punkt.setStyleSheet(f"background:{farbe}; border-radius:4px;")
+            wert.setText(text_ok if ok else text_bad)
+            wert.setObjectName("healthValOk" if ok else "healthValBad")
+            wert.setStyleSheet(f"color:{farbe}; font-size:12px; font-weight:700;")
+
+        def _offene_transkripte(self) -> int:
+            """Aufnahmen mit Ton, die noch keinen Text haben."""
+            try:
+                from voice_flow.recording_storage import list_pending_with_audio
+
+                return len(list_pending_with_audio())
+            except Exception as ex:
+                log.debug("Offene Aufnahmen nicht zaehlbar: %s", ex)
+                return 0
+
+        def _on_fix_screen(self) -> None:
+            """Toten Bildschirm-Eintrag loeschen und die Liste oeffnen.
+
+            Hier — und NUR hier — darf sich ein Systemfenster oeffnen: weil
+            Bastian selbst geklickt hat.
+            """
+            from voice_flow import darwin_permissions as dp
+
+            # Reihenfolge zaehlt: erst den (moeglicherweise toten) Eintrag
+            # loeschen, dann fragen. Ohne den Reset zeigt macOS den Dialog nicht
+            # noch einmal, und ohne die Frage taucht Voice Flow nach dem Reset
+            # gar nicht mehr in der Liste auf — dann kaeme man nie wieder rein.
+            dp.repair_screen_capture()
+            dp.request_screen_capture()
+            dp.open_screen_capture_settings()
+            self._fix_screen.setText(
+                "Haken bei Voice Flow setzen, dann App neu starten")
+
+        def _on_fix_transcripts(self) -> None:
+            """Liegengebliebene Aufnahmen nachtraeglich verschriften."""
+            import threading
+
+            self._fix_transcripts.setEnabled(False)
+            self._fix_transcripts.setText("Laeuft …")
+
+            def arbeite() -> None:
+                text = "Fehlende Transkripte nachholen"
+                try:
+                    from voice_flow.recover import nachholen
+
+                    geschafft, fehler = nachholen(
+                        fortschritt=lambda fertig, gesamt:
+                        self.sig_recover_text.emit(f"{fertig} von {gesamt} …", False))
+                    if fehler:
+                        text = f"{geschafft} nachgeholt, {fehler} gescheitert"
+                    elif geschafft:
+                        text = f"{geschafft} nachgeholt"
+                except Exception as ex:
+                    log.warning("Nachtraegliche Verschriftung fehlgeschlagen: %s", ex)
+                    text = "Fehlgeschlagen — siehe Protokoll"
+                finally:
+                    self.sig_recover_text.emit(text, True)
+
+            threading.Thread(target=arbeite, daemon=True).start()
+
+        def _apply_recover_text(self, text: str, klickbar: bool) -> None:
+            self._fix_transcripts.setText(text)
+            self._fix_transcripts.setEnabled(klickbar)
 
         def _hotkey_rows(self, record_key: str) -> list[tuple[str, str]]:
             # F9 (Senden) kommt sobald das Feature gebaut ist.

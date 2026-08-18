@@ -20,7 +20,7 @@ from voice_flow.logging_setup import setup_logging
 from voice_flow.recording_storage import (
     RECORDINGS_DIR,
     cleanup_old_recordings,
-    list_pending_recordings,
+    list_pending_with_audio,
 )
 from voice_flow.singleton import SingletonLock
 
@@ -282,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     # Recording-Retention (Alter + Groessen-Deckel), dann pending listen
     try:
         cleanup_old_recordings()
-        pending = list_pending_recordings()
+        pending = list_pending_with_audio()
         if pending:
             log.warning(
                 "%d Recording(s) liegen in %s — Retry: python -m voice_flow.recover",
@@ -357,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
     # 27.06 Bastian: F6 = Loom-Zeichen-Overlay, dann Screenshot mit Markierungen.
     keyboard.add_hotkey(cfg.annotate_hotkey, app.on_annotate_hotkey, suppress=False)
     keyboard.add_hotkey(cfg.quit_hotkey, quit_handler)
+    # ESC schliesst die Zeichen-Ebene. Noetig, seit die Ebene den Fokus nicht
+    # mehr an sich reisst (sonst kam das minimierte Fenster hoch, 19.08.).
+    keyboard.add_hotkey("esc", app.on_escape, suppress=False)
 
     log.info(
         "Bereit. %s %s zum Diktieren, %s zum Beenden.",

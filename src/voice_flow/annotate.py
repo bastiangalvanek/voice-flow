@@ -190,7 +190,12 @@ def build_annotate_class():
 
             self.show()
             self.raise_()
-            self.activateWindow()
+            # KEIN activateWindow(): das aktiviert die App Voice Flow, und macOS
+            # holt dabei das Kontrollfenster wieder hervor.
+            # 19.08 Bastian: "wenn ich es minimiere, soll es minimiert bleiben".
+            # Die Leiste und das Zeichnen laufen ueber die Maus, die auch ohne
+            # Aktivierung ankommt (beim Modus-Chip am 18.08. gemessen). ESC
+            # kommt ueber den globalen Tastatur-Listener (siehe on_escape).
 
         # ---- State-Helfer ----
 

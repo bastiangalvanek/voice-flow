@@ -695,6 +695,14 @@ class RecordingOverlay:
         if self._control is not None:
             self._control.set_devices(devices, selected_name, on_select)
 
+    def close_annotate(self) -> bool:
+        """ESC: offene Zeichen-Ebene schliessen. True wenn eine offen war."""
+        bruecke = getattr(self, "_annotate_bridge", None)
+        if bruecke is None or bruecke._overlay is None:
+            return False
+        bruecke.sig_close.emit()
+        return True
+
     def open_annotate(self, monitor: dict, on_shoot: Callable) -> None:
         """F6: Zeichen-Overlay oeffnen. THREAD-SAFE aus dem Hook-Thread.
 
@@ -872,12 +880,28 @@ def _build_annotate_bridge_class():
 
     class AnnotateBridge(QObject):
         sig_open = pyqtSignal(object, object)  # (monitor: dict, on_shoot: Callable)
+        sig_close = pyqtSignal()               # ESC vom globalen Tastatur-Listener
 
         def __init__(self):
             super().__init__()
             self._overlay = None
             self._last_open = 0.0
             self.sig_open.connect(self._on_open, Qt.ConnectionType.QueuedConnection)
+            self.sig_close.connect(self._on_close, Qt.ConnectionType.QueuedConnection)
+
+        def _on_close(self):
+            """Zeichen-Ebene schliessen, ohne die App zu aktivieren.
+
+            Seit 19.08. holt die Zeichen-Ebene den Tastatur-Fokus nicht mehr
+            (sonst kam das minimierte Kontrollfenster mit hoch). ESC muss
+            deshalb von aussen kommen — ueber den globalen Listener.
+            """
+            if self._overlay is None:
+                return
+            try:
+                self._overlay.close()
+            except Exception:
+                self._overlay = None
 
         def _clear_overlay(self):
             self._overlay = None

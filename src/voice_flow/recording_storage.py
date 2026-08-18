@@ -199,3 +199,27 @@ def list_pending_recordings() -> list[Path]:
     if not RECORDINGS_DIR.exists():
         return []
     return sorted(p for p in RECORDINGS_DIR.glob("recording_*.wav") if _is_open_work(p))
+
+
+# 16 kHz, 16 bit, mono = 32 KB Ton pro Sekunde. Alles unter anderthalb Sekunden
+# ist ein Fehlstart (Taste zweimal getippt) und enthaelt nie Sprache.
+MINDESTGROESSE_BYTES = 48 * 1024
+
+
+def list_pending_with_audio() -> list[Path]:
+    """Liegengebliebene Aufnahmen, in denen ueberhaupt Ton steckt.
+
+    EINE Quelle fuer beide Anzeigen (Hinweis beim Start und Zeile im Fenster) —
+    sonst nennen die beiden verschiedene Zahlen fuer dieselbe Sache
+    (gemessen 19.08.: 15 im Hinweis, 12 im Fenster).
+    Geloescht wird nichts; Fehlstarts bleiben liegen, sie werden nur nicht
+    als "Transkript fehlt" gezaehlt.
+    """
+    behalten = []
+    for pfad in list_pending_recordings():
+        try:
+            if pfad.stat().st_size >= MINDESTGROESSE_BYTES:
+                behalten.append(pfad)
+        except OSError:
+            continue
+    return behalten
