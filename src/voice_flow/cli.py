@@ -360,6 +360,8 @@ def main(argv: list[str] | None = None) -> int:
     # ESC schliesst die Zeichen-Ebene. Noetig, seit die Ebene den Fokus nicht
     # mehr an sich reisst (sonst kam das minimierte Fenster hoch, 19.08.).
     keyboard.add_hotkey("esc", app.on_escape, suppress=False)
+    # Letztes Diktat noch einmal einfuegen (Text, dann Bilder).
+    keyboard.add_hotkey(cfg.repaste_hotkey, app.on_repaste_hotkey, suppress=False)
 
     log.info(
         "Bereit. %s %s zum Diktieren, %s zum Beenden.",

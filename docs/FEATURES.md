@@ -43,6 +43,7 @@ a dictation.
 | **F3** | **F7** | Screenshot of the monitor under the mouse pointer |
 | **F6** | **F6** | Annotate: draw on screen, then capture |
 | **ESC** | **ESC** | Cancel annotation |
+| **Cmd+Shift+V** | **Ctrl+Shift+V** | Paste the last dictation again — text, then all images |
 | **Ctrl+Shift+Alt+Q** | **Ctrl+Shift+Alt+Q** | Quit Voice Flow |
 
 The platforms differ on purpose: on a MacBook, F8 is Play and F7 is Previous
@@ -54,6 +55,7 @@ All keys are configurable:
 VOICE_FLOW_HOTKEY=f5
 VOICE_FLOW_SCREENSHOT_HOTKEY=f3
 VOICE_FLOW_ANNOTATE_HOTKEY=f6
+VOICE_FLOW_REPASTE_HOTKEY=cmd+shift+v
 ```
 
 ---
@@ -79,6 +81,20 @@ Here is the customer list, it loads far too slowly.
 And this filter over here returns the wrong rows.
 (see shot_02.png in bucket: /Users/you/voice-flow/sessions/2026-08-19_03-10-53/shot_02.png)
 ```
+
+### Multiple monitors: the one your mouse is on
+
+There is nothing to configure and nothing to aim. **Voice Flow captures the
+monitor the mouse pointer is on at the moment you press the key.** Move the
+mouse to the screen you are talking about, press F3 (Windows: F7), keep
+speaking. Three monitors work exactly like one.
+
+The choice is made per capture, not per session — you can grab screen 2, then
+screen 1, then screen 3 inside one dictation. If the pointer somehow sits
+outside every screen, the first monitor is used rather than failing.
+
+The captured image is the full monitor at its native resolution, so a 4K screen
+gives a 4K screenshot.
 
 ### Where the files go
 
@@ -107,6 +123,27 @@ Screenshots are useless if the receiver cannot open them. The switch decides
 Click the chip to switch. It shows the mark of its target: **Clawd**, the Claude
 Code mascot, or the round **Chrome** mark.
 
+### Many images at once — the point of AI-Web mode
+
+**Every screenshot of the dictation is attached in a single paste.** Not one by
+one, not the first one only: if you took eleven screenshots while talking, all
+eleven land in the chat at once, in order, and the text refers to them as
+`(siehe Bild 1)` … `(siehe Bild 11)`.
+
+That is what makes long, image-heavy dictation practical:
+
+1. Start recording, keep talking while you work.
+2. Press the screenshot key whenever something is worth showing — on whichever
+   monitor your mouse happens to be.
+3. Stop. Text and every image go into the chat field together.
+
+There is **no limit in the program**. The realistic ceiling is what the web app
+on the other side accepts as attachments per message, not Voice Flow.
+
+Technically the images are handed over the way Finder or Explorer hands over a
+multi-file copy: as a list of file references on the clipboard. Chrome, ChatGPT,
+Claude and Lovable treat that exactly like dragging the files in.
+
 ### Why AI-Web pastes twice
 
 Browsers drop `text/plain` from the clipboard as soon as files are present — you
@@ -115,6 +152,36 @@ first the text, then the images. The success message tells you how many images
 went along.
 
 The mode is remembered between runs.
+
+### Paste it again — Cmd+Shift+V / Ctrl+Shift+V
+
+You clicked the wrong tab, the chat swallowed the attachments, or the page
+reloaded. Instead of dictating again:
+
+**Click the right field, press Cmd+Shift+V (Windows: Ctrl+Shift+V).** The whole
+cascade runs again into that window — first the text, then all the images.
+
+Details worth knowing:
+
+- **The switch decides at that moment, not at dictation time.** Dictated for
+  Claude Code but now repeating into a browser? Flip the chip to AI-Web first
+  and the text is rewritten with `(siehe Bild N)` markers instead of file paths,
+  and the images come along. The dictation is stored *without* markers precisely
+  so this stays correct.
+- It works as often as you like — the last dictation stays available until the
+  next one replaces it.
+- Voice Flow waits until you have let go of Shift and Cmd/Ctrl before pasting.
+  Otherwise the target application would receive Cmd+Shift+V — in Chrome that is
+  "paste as plain text", which is the one thing you do not want here.
+- The shortcut is configurable:
+
+  ```
+  VOICE_FLOW_REPASTE_HOTKEY=cmd+alt+v
+  ```
+
+Why not simply hijack Cmd+V itself? Because that would change pasting in every
+application on the machine, forever, including places where you just want the
+clipboard. A separate shortcut does the same job without that cost.
 
 ---
 
@@ -304,6 +371,7 @@ VOICE_FLOW_HOTKEY=f5                      # record key
 VOICE_FLOW_HOTKEY_MODE=toggle             # toggle | hold
 VOICE_FLOW_SCREENSHOT_HOTKEY=f3
 VOICE_FLOW_ANNOTATE_HOTKEY=f6
+VOICE_FLOW_REPASTE_HOTKEY=cmd+shift+v    # repeat last dictation (ctrl+shift+v on Windows)
 VOICE_FLOW_LANGUAGE=de                    # or auto
 VOICE_FLOW_WHISPER_MODEL=gpt-4o-mini-transcribe
 VOICE_FLOW_CLEANUP_MODEL=claude-haiku-4-5-20251001

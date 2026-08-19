@@ -35,6 +35,10 @@ class Config:
     # 27.06 Bastian: Session-Buckets unter ~/voice-flow/sessions/<timestamp>/.
     sessions_dir: Path = field(default_factory=lambda: Path.home() / "voice-flow" / "sessions")
     quit_hotkey: str = "ctrl+shift+alt+q"
+    # 19.08 Bastian: "wenn Bilder mal nicht mitgeliefert wurden oder man im
+    # falschen Tab war — wieder Strg+V". Ein eigenes Kuerzel statt Strg+V selbst:
+    # das normale Einfuegen darf systemweit nicht umgebogen werden.
+    repaste_hotkey: str = "cmd+shift+v" if sys.platform == "darwin" else "ctrl+shift+v"
     # 07.07 Bastian "falsche Sprache, mega weird — auch bei ChatGPT im Web":
     # Grundursache ist das System-Mikro (Bluetooth-Headset im 8-kHz-Hands-Free-
     # Modus → matschiges Audio). Auf so verwaschenem Audio hat "auto" Whisper die
@@ -105,6 +109,9 @@ def load_config(overrides: dict | None = None) -> Config:
         hotkey_mode=os.getenv("VOICE_FLOW_HOTKEY_MODE", "toggle"),
         screenshot_hotkey=os.getenv("VOICE_FLOW_SCREENSHOT_HOTKEY", "f3" if sys.platform == "darwin" else "f7"),
         annotate_hotkey=os.getenv("VOICE_FLOW_ANNOTATE_HOTKEY", "f6"),
+        repaste_hotkey=os.getenv(
+            "VOICE_FLOW_REPASTE_HOTKEY",
+            "cmd+shift+v" if sys.platform == "darwin" else "ctrl+shift+v"),
         language=os.getenv("VOICE_FLOW_LANGUAGE", "de"),
         whisper_model=os.getenv("VOICE_FLOW_WHISPER_MODEL", "gpt-4o-mini-transcribe"),
         cleanup_model=os.getenv(

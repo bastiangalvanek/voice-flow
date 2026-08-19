@@ -417,6 +417,101 @@ class VoiceFlowApp:
         except Exception as ex:
             log.debug("ESC-Behandlung fehlgeschlagen: %s", ex)
 
+    def _kaskade_einfuegen(self, text: str, shots: list, captures: list,
+                           duration: float, mode: str) -> tuple[str, int]:
+        """Text einfuegen, danach — nur im AI-Web-Modus — die Bilder.
+
+        Zwei getrennte Vorgaenge, weil Chrome den Text verwirft, sobald Dateien
+        mit auf der Zwischenablage liegen (gemessen 18.08.: text="" sobald
+        Dateien dabei sind). Deshalb erst die Worte, dann die Bilder.
+
+        ALLE Bilder gehen in EINEM Vorgang mit — Chrome nimmt eine Mehrfach-
+        Dateiauswahl als mehrere Anhaenge an. Es gibt keine Obergrenze im
+        Programm; zwanzig Screenshots landen genauso in einem Rutsch wie zwei.
+
+        Rueckgabe: (eingefuegter Text, Anzahl eingefuegter Bilder)
+        """
+        shot_index = {str(p): i + 1 for i, p in enumerate(shots)}
+        marker = [(off, target_mode.capture_marker(p, shot_index.get(p, 1), mode))
+                  for off, p in captures]
+        final_text = weave_screenshot_markers(text, marker, duration) if marker else text
+
+        paste_to_active_window(
+            final_text, restore_clipboard=self.config.enable_clipboard_restore)
+
+        pasted_images = 0
+        if mode == target_mode.MODE_AI_WEB and shots:
+            try:
+                pasted_images = paste_files_to_active_window(shots)
+                log.info("PASTE  ✓ %d Bild(er) als Dateien eingefuegt.", pasted_images)
+            except Exception as ex:
+                log.error("Bilder-Einfuegen fehlgeschlagen: %s", ex)
+                if self.overlay:
+                    self.overlay.show_info(
+                        f"Text ist drin, Bilder nicht ({ex}). "
+                        "Ordner ueber den Toast oeffnen und manuell ziehen.",
+                        6000,
+                    )
+        return final_text, pasted_images
+
+    def on_repaste_hotkey(self) -> None:
+        """Das letzte Diktat noch einmal einfuegen — Text, dann Bilder.
+
+        19.08 Bastian: falscher Tab erwischt, oder die Bilder kamen nicht mit.
+        Richtiges Feld anklicken, Kuerzel druecken, alles ist wieder da.
+
+        Der Modus zaehlt IN DIESEM MOMENT: steht der Schalter jetzt auf AI-Web,
+        bekommt der Browser Bildnummern und die Bilder selbst, auch wenn das
+        Diktat urspruenglich fuer Claude Code gedacht war.
+        """
+        log.debug("REPASTE  Kuerzel gedrueckt.")
+        letztes = getattr(self, "_letztes_diktat", None)
+        if not letztes:
+            log.info("REPASTE  nichts zu wiederholen — noch kein Diktat in diesem Lauf.")
+            if self.overlay:
+                self.overlay.show_info("Noch kein Diktat zum Wiederholen.", 3000)
+            return
+
+        # Das Kuerzel selbst haelt Umschalt/Befehl gedrueckt. Wuerde jetzt sofort
+        # Befehl+V gesendet, kaeme in der Ziel-App Befehl+Umschalt+V an — in
+        # Chrome "als Klartext einfuegen", also genau das Falsche.
+        self._warte_auf_losgelassene_tasten()
+
+        mode = self.resolved_paste_mode()
+        try:
+            _, bilder = self._kaskade_einfuegen(
+                letztes["text"], letztes["shots"], letztes["captures"],
+                letztes["duration"], mode)
+        except Exception as ex:
+            log.error("Wiederholtes Einfuegen fehlgeschlagen: %s", ex)
+            if self.overlay:
+                self.overlay.show_info(f"Wiederholen fehlgeschlagen: {ex}", 5000)
+            return
+
+        wortzahl = len(letztes["text"].split())
+        zusatz = f" + {bilder} Bild(er)" if bilder else ""
+        log.info("REPASTE  ✓ %d Worte%s (Modus %s)", wortzahl, zusatz, mode)
+        if self.overlay:
+            self.overlay.show_info(
+                f"Nochmal eingefuegt: {wortzahl} Worte{zusatz}", 3000)
+
+    def _warte_auf_losgelassene_tasten(self, grenze: float = 1.5) -> None:
+        """Warten bis keine Zusatztaste mehr haengt (hoechstens `grenze` Sekunden)."""
+        import sys as _sys
+
+        if _sys.platform == "darwin":
+            from voice_flow import _keyboard_mac as kb
+        else:
+            import keyboard as kb
+
+        ende = time.monotonic() + grenze
+        while time.monotonic() < ende:
+            if not any(kb.is_pressed(t) for t in ("shift", "cmd", "ctrl", "alt")):
+                time.sleep(0.05)   # der Ziel-App einen Wimpernschlag geben
+                return
+            time.sleep(0.03)
+        log.debug("Zusatztasten noch gedrueckt — fuege trotzdem ein.")
+
     def on_annotate_hotkey(self) -> None:
         """F6: Loom-Zeichen-Overlay auf dem Monitor unter der Maus oeffnen.
 
@@ -520,39 +615,25 @@ class VoiceFlowApp:
             # 18.08 Bastian: Marker-Form haengt am Ziel — Claude Code bekommt den
             # Pfad, ein Web-Chat die Bildnummer (dort ist der Pfad wertlos, weil
             # der Browser das Verzeichnis nicht hat).
-            mode = self.resolved_paste_mode()
             shots = list(self.session.shots) if self.session is not None else []
-            shot_index = {str(p): i + 1 for i, p in enumerate(shots)}
-            final_text = cleaned
-            caps = []
-            if self.session is not None:
-                for off, p in self.session.captures:
-                    caps.append((off, target_mode.capture_marker(p, shot_index.get(p, 1), mode)))
-            if caps:
-                final_text = weave_screenshot_markers(cleaned, caps, duration)
+            caps_roh = list(self.session.captures) if self.session is not None else []
+
+            # 19.08 Bastian: "wenn Bilder mal nicht mitgeliefert wurden oder man
+            # im falschen Tab war — wieder Strg+V und dann erst Text und danach
+            # die Bilder". Dafuer wird das Diktat OHNE Marker gemerkt: beim
+            # Wiederholen werden die Marker im dann gueltigen Modus neu gesetzt,
+            # sonst stuenden im Web-Chat Dateipfade, die dort nichts nuetzen.
+            self._letztes_diktat = {
+                "text": cleaned,
+                "shots": shots,
+                "captures": caps_roh,
+                "duration": duration,
+            }
 
             self._ensure_target_frontmost()
-            paste_to_active_window(
-                final_text,
-                restore_clipboard=self.config.enable_clipboard_restore,
-            )
-
-            # AI-Web: die Bilder als DATEIEN hinterher einfuegen. Zwei Vorgaenge,
-            # weil Chrome bei gemischter Zwischenablage den Text verwirft
-            # (gemessen 18.08: text="" sobald Dateien mit drauf liegen).
-            pasted_images = 0
-            if mode == target_mode.MODE_AI_WEB and shots:
-                try:
-                    pasted_images = paste_files_to_active_window(shots)
-                    log.info("PASTE  ✓ %d Bild(er) als Dateien eingefuegt.", pasted_images)
-                except Exception as ex:
-                    log.error("Bilder-Einfuegen fehlgeschlagen: %s", ex)
-                    if self.overlay:
-                        self.overlay.show_info(
-                            f"Text ist drin, Bilder nicht ({ex}). "
-                            "Ordner ueber den Toast oeffnen und manuell ziehen.",
-                            6000,
-                        )
+            mode = self.resolved_paste_mode()
+            final_text, pasted_images = self._kaskade_einfuegen(
+                cleaned, shots, caps_roh, duration, mode)
             total_s = time.time() - t0
             word_count = len(cleaned.split())
             log.info(

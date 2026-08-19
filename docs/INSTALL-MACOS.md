@@ -74,6 +74,7 @@ background and Voice Flow's own windows, with every other app missing.
 | **F5** | Start / stop recording — the text is pasted when you stop |
 | **F3** | Screenshot of the monitor under the mouse pointer |
 | **F6** | Annotate: draw, then capture |
+| **Cmd+Shift+V** | Paste the last dictation again — text, then all images |
 | **ESC** | Cancel annotation |
 | **Ctrl+Shift+Alt+Q** | Quit Voice Flow |
 
@@ -89,6 +90,12 @@ It decides **how** screenshots travel when the text is pasted:
   in the browser, Lovable). The web has no access to your file system.
 
 Click to switch. Default is Claude Code.
+
+### Wrong tab? Paste it again
+
+Click the right field and press **Cmd+Shift+V**. The whole last dictation goes in
+again: first the text, then every screenshot. Useful when a chat swallowed the
+attachments or you hit the wrong tab.
 
 ### The pen right of the pill
 
