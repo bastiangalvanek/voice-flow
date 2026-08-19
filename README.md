@@ -1,43 +1,49 @@
 # Voice Flow — Galvanek Edition
 
-Diktat-Werkzeug fuer **macOS und Windows**. Taste druecken, sprechen, Taste
-druecken — der Text landet dort, wo der Cursor steht (Gmail, ClickUp, Word,
-Browser, Claude Code, egal). Screenshots gehen mit: als Dateipfad fuer Claude
-Code oder als echte Bilder fuers Web.
+Dictation tool for **macOS and Windows**. Press a key, speak, press again — the
+text lands wherever your cursor is (Gmail, ClickUp, Word, browser, Claude Code,
+anything). Screenshots come along: as file paths for Claude Code, or as real
+images for the web.
 
-**Technik:** OpenAI Whisper (Verschriftung) + Claude Haiku 4.5 (Nachbearbeitung
-mit Galvanek-Vokabular).
+Built on OpenAI Whisper for transcription, with an optional Claude Haiku 4.5
+cleanup pass.
 
 ---
 
-## Fertiges Programm laden
+## Download
 
-Kein Python, kein Terminal, keine Einrichtung — beide Fassungen liegen als
-fertiges Installationsprogramm bereit:
+No Python, no terminal, no setup — both platforms ship as a finished installer:
 
-**[→ Aktuelle Version herunterladen](https://github.com/bastiangalvanek/voice-flow/releases/latest)**
+**[→ Download the latest version](https://github.com/bastiangalvanek/voice-flow/releases/latest)**
 
-| Betriebssystem | Datei | Anleitung |
+| Platform | File | Guide |
 |---|---|---|
-| **macOS** (Apple Silicon) | `VoiceFlow-vX.Y.Z-macOS.dmg` | **[Anleitung Mac](docs/ANLEITUNG-MAC.md)** |
-| **Windows 10/11** | `VoiceFlow-X.Y.Z-Setup.exe` | **[Anleitung Windows](docs/ANLEITUNG-WINDOWS.md)** |
-| Windows ohne Installation | `VoiceFlow-X.Y.Z-Windows.zip` | entpacken, `VoiceFlow.exe` starten |
+| **macOS** (Apple Silicon) | `VoiceFlow-vX.Y.Z-macOS.dmg` | **[macOS setup](docs/INSTALL-MACOS.md)** |
+| **Windows 10/11** | `VoiceFlow-X.Y.Z-Setup.exe` | **[Windows setup](docs/INSTALL-WINDOWS.md)** |
+| Windows, no installer | `VoiceFlow-X.Y.Z-Windows.zip` | unpack, run `VoiceFlow.exe` |
 
-In keinem Download steckt ein API-Schluessel — den traegt jeder selbst ein
-(steht in beiden Anleitungen, eine Zeile).
+**[→ Complete feature reference](docs/FEATURES.md)** — every feature explained in
+detail: screenshot weaving, target modes, annotation, the data-loss safety net,
+long-recording chunking, and the full configuration reference.
 
-Jede Version wird vor der Veroeffentlichung geprueft: Tests auf beiden
-Systemen, und unter Windows wird das Installationsprogramm auf einer echten
-Windows-Maschine **wirklich installiert, gestartet und wieder entfernt**.
-Schlaegt einer dieser Schritte fehl, erscheint die Version gar nicht erst.
+No download contains an API key — you add your own (one line, covered in both
+setup guides).
 
-### Tasten
+### Keys
 
-| macOS | Windows | Was |
+| macOS | Windows | Action |
 |---|---|---|
-| F5 | F8 | Aufnahme starten / stoppen |
-| F3 | F7 | Screenshot vom Bildschirm unter der Maus |
-| F6 | F6 | Markieren: zeichnen, dann fotografieren |
+| F5 | F8 | Start / stop recording |
+| F3 | F7 | Screenshot of the monitor under the mouse |
+| F6 | F6 | Annotate: draw, then capture |
+
+### How releases are verified
+
+Every release runs the full test suite on both platforms. On Windows the
+installer is additionally **installed, launched and uninstalled on a real
+Windows machine** — if any of that fails, the release never publishes. Not
+covered there: how the window *looks*, since the build machine has no screen.
+That is checked by hand.
 
 ---
 
