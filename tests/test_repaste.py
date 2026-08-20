@@ -197,3 +197,61 @@ def test_kaskade_merkt_sich_den_zwischenablage_stand(monkeypatch):
 
     app._kaskade_einfuegen("Text.", [], [], 1.0, target_mode.MODE_CLAUDE_CODE)
     assert app._clipboard_stand is None
+
+
+def test_web_pause_liegt_zwischen_text_und_bildern(monkeypatch):
+    """20.08: 13 Bilder kamen bei Lovable nicht an — Text und Dateiliste trafen
+    0,42 s auseinander ein. Die Kaskade muss der Web-App Luft lassen, und zwar
+    NACH dem Text und VOR den Bildern (davor waere sie wirkungslos)."""
+    import voice_flow.app as app_mod
+
+    ablauf: list = []
+    monkeypatch.setattr(app_mod, "paste_to_active_window",
+                        lambda *a, **k: ablauf.append("text"))
+    monkeypatch.setattr(app_mod, "paste_files_to_active_window",
+                        lambda p: (ablauf.append("bilder"), len(p))[1])
+    monkeypatch.setattr(app_mod.time, "sleep",
+                        lambda s: ablauf.append(("pause", s)))
+
+    app = VoiceFlowApp.__new__(VoiceFlowApp)
+    app.config = types.SimpleNamespace(enable_clipboard_restore=False)
+    app.overlay = None
+    app._kaskade_einfuegen("Text.", ["/tmp/shot_01.png"],
+                           [(1.0, "/tmp/shot_01.png")], 2.0,
+                           target_mode.MODE_AI_WEB)
+
+    assert ablauf == ["text", ("pause", app_mod.WEB_BILDER_PAUSE_SEC), "bilder"]
+
+    # Claude-Code-Modus: keine Bilder, keine Pause.
+    ablauf.clear()
+    app._kaskade_einfuegen("Text.", ["/tmp/shot_01.png"],
+                           [(1.0, "/tmp/shot_01.png")], 2.0,
+                           target_mode.MODE_CLAUDE_CODE)
+    assert ablauf == ["text"]
+
+
+def test_ab_fuenf_bildern_kommt_der_sende_hinweis(monkeypatch):
+    """"Eingefuegt" heisst nur uebergeben — bei vielen Bildern muss der Hinweis
+    kommen, nicht zu senden bevor alle Vorschauen geladen sind."""
+    import voice_flow.app as app_mod
+
+    monkeypatch.setattr(app_mod, "paste_to_active_window", lambda *a, **k: None)
+    monkeypatch.setattr(app_mod, "paste_files_to_active_window", lambda p: len(p))
+    monkeypatch.setattr(app_mod.time, "sleep", lambda s: None)
+
+    hinweise: list = []
+    app = VoiceFlowApp.__new__(VoiceFlowApp)
+    app.config = types.SimpleNamespace(enable_clipboard_restore=False)
+    app.overlay = types.SimpleNamespace(show_info=lambda t, ms=0: hinweise.append(t))
+
+    fuenf = [f"/tmp/shot_{i:02d}.png" for i in range(1, 6)]
+    app._kaskade_einfuegen("Text.", fuenf,
+                           [(float(i), p) for i, p in enumerate(fuenf)], 9.0,
+                           target_mode.MODE_AI_WEB)
+    assert any("Vorschauen" in h for h in hinweise), hinweise
+
+    hinweise.clear()
+    app._kaskade_einfuegen("Text.", fuenf[:2],
+                           [(1.0, fuenf[0]), (2.0, fuenf[1])], 4.0,
+                           target_mode.MODE_AI_WEB)
+    assert hinweise == [], "bei 2 Bildern kein Hinweis-Spam"

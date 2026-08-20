@@ -20,6 +20,15 @@ from voice_flow.recording_storage import (
     save_recording,
 )
 from voice_flow.settings import Settings
+
+# 20.08: 13 Bilder kamen bei Lovable nicht an, obwohl "eingefuegt" gemeldet war.
+# Der Text (130 Woerter) und die Dateiliste trafen nur 0,42 s auseinander ein —
+# waehrend ein Web-Editor den Text-Paste noch verarbeitet, kann er den
+# Datei-Paste verschlucken. Diese Pause gibt der Web-App Luft. Sie kostet nur
+# im AI-Web-Modus mit Bildern Zeit und ist per .env justierbar.
+import os as _os
+
+WEB_BILDER_PAUSE_SEC = float(_os.getenv("VOICE_FLOW_WEB_BILDER_PAUSE", "1.2"))
 from voice_flow import target_mode
 from voice_flow.sound import beep_error, beep_ready, beep_start, beep_stop
 from voice_flow.transcript_history import append_transcript
@@ -441,9 +450,21 @@ class VoiceFlowApp:
 
         pasted_images = 0
         if mode == target_mode.MODE_AI_WEB and shots:
+            # Erst den Text verdauen lassen, dann die Bilder (siehe Konstante).
+            time.sleep(WEB_BILDER_PAUSE_SEC)
             try:
                 pasted_images = paste_files_to_active_window(shots)
                 log.info("PASTE  ✓ %d Bild(er) als Dateien eingefuegt.", pasted_images)
+                # "Eingefuegt" heisst nur: der Web-App uebergeben. Ob alle
+                # ankommen, zeigt erst die Vorschau-Leiste im Chat — und eine
+                # zu frueh abgeschickte Nachricht laesst ladende Anhaenge
+                # zurueck. Ab 5 Bildern deshalb der Hinweis.
+                if pasted_images >= 5 and self.overlay:
+                    self.overlay.show_info(
+                        f"{pasted_images} Bilder angehaengt — erst senden, "
+                        "wenn alle Vorschauen geladen sind.",
+                        6000,
+                    )
             except Exception as ex:
                 log.error("Bilder-Einfuegen fehlgeschlagen: %s", ex)
                 if self.overlay:
