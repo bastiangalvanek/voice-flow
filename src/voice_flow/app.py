@@ -452,7 +452,54 @@ class VoiceFlowApp:
                         "Ordner ueber den Toast oeffnen und manuell ziehen.",
                         6000,
                     )
+        # Cmd+V-Kaskade scharf stellen: nur wenn die Zwischenablage jetzt
+        # UNSERE Bilder traegt, darf ein spaeteres Cmd+V die Kaskade ausloesen.
+        from voice_flow import smart_paste
+
+        self._clipboard_stand = (smart_paste.clipboard_stand()
+                                 if mode == target_mode.MODE_AI_WEB else None)
         return final_text, pasted_images
+
+    def on_cmd_v(self) -> bool:
+        """Vom Tastatur-Tap gerufen. True = wir uebernehmen dieses Cmd+V.
+
+        Muss SOFORT zurueckkehren (laeuft im Event-Tap, jede Verzoegerung
+        bremst systemweit das Tippen) — die Arbeit passiert im Thread.
+        Im Zweifel False: das native Einfuegen darf nie kaputtgehen.
+        """
+        try:
+            from voice_flow import smart_paste
+
+            if not smart_paste.soll_kaskadieren(
+                    self.resolved_paste_mode(),
+                    bool(getattr(self, "_letztes_diktat", None)),
+                    smart_paste.clipboard_stand(),
+                    getattr(self, "_clipboard_stand", None),
+                    getattr(self, "_kaskade_aktiv", False)):
+                return False
+        except Exception as ex:
+            log.debug("Cmd+V-Entscheidung fehlgeschlagen, native: %s", ex)
+            return False
+        self._kaskade_aktiv = True   # sofort, nicht erst im Thread: das naechste
+        threading.Thread(target=self._cmd_v_kaskade, daemon=True).start()
+        return True
+
+    def _cmd_v_kaskade(self) -> None:
+        try:
+            self._warte_auf_losgelassene_tasten()
+            letztes = self._letztes_diktat
+            mode = self.resolved_paste_mode()
+            _, bilder = self._kaskade_einfuegen(
+                letztes["text"], letztes["shots"], letztes["captures"],
+                letztes["duration"], mode)
+            log.info("REPASTE  ✓ per Cmd+V: %d Worte + %d Bild(er)",
+                     len(letztes["text"].split()), bilder)
+        except Exception as ex:
+            log.error("Cmd+V-Kaskade fehlgeschlagen: %s", ex)
+            if self.overlay:
+                self.overlay.show_info(f"Einfuegen fehlgeschlagen: {ex}", 5000)
+        finally:
+            self._kaskade_aktiv = False
 
     def on_repaste_hotkey(self) -> None:
         """Das letzte Diktat noch einmal einfuegen — Text, dann Bilder.

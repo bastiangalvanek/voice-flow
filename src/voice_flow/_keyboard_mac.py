@@ -139,11 +139,60 @@ def _on_release(key) -> None:
     _fire(handlers, name)
 
 
+# ---------------------------------------------------------------- Cmd+V-Haken
+
+# 20.08 Bastian: einmal Cmd+V soll im AI-Web-Modus die ganze Kaskade ausloesen
+# (erst Text, dann Bilder). Dafuer muss das native Cmd+V GESCHLUCKT werden
+# koennen — pynput kann das auf macOS ueber darwin_intercept (laeuft als Event-
+# Tap, gedeckt durch die ohnehin noetige Bedienungshilfen-Freigabe).
+#
+# Der Haken gibt True zurueck, wenn Voice Flow das Cmd+V uebernimmt. Jeder
+# andere Fall — kein Haken gesetzt, falsche Tasten, Fehler im Haken — laesst
+# das Ereignis UNBERUEHRT durch. Einfuegen darf nie kaputtgehen.
+_cmd_v_hook = None
+_KEYCODE_V = 9  # ANSI-Layout; gilt auch auf der deutschen Mac-Tastatur
+
+
+def set_cmd_v_hook(callback) -> None:
+    """callback() -> bool. True = Cmd+V schlucken (Kaskade laeuft an)."""
+    global _cmd_v_hook
+    _cmd_v_hook = callback
+
+
+def _intercept(event_type, event):
+    """Laeuft fuer JEDES Tastatur-Ereignis — der schnelle Pfad zaehlt."""
+    if _cmd_v_hook is None:
+        return event
+    try:
+        import Quartz
+
+        if event_type != Quartz.kCGEventKeyDown:
+            return event
+        if Quartz.CGEventGetIntegerValueField(
+                event, Quartz.kCGKeyboardEventKeycode) != _KEYCODE_V:
+            return event
+        flags = Quartz.CGEventGetFlags(event)
+        if not flags & Quartz.kCGEventFlagMaskCommand:
+            return event
+        # Cmd+Shift+V (Wiederholen-Kuerzel), Cmd+Alt+V, Cmd+Ctrl+V: nicht unser Fall.
+        if flags & (Quartz.kCGEventFlagMaskShift
+                    | Quartz.kCGEventFlagMaskAlternate
+                    | Quartz.kCGEventFlagMaskControl):
+            return event
+        if _cmd_v_hook():
+            log.debug("Cmd+V uebernommen (Kaskade).")
+            return None
+    except Exception as ex:
+        log.debug("Cmd+V-Haken-Fehler, Ereignis laeuft durch: %s", ex)
+    return event
+
+
 def _ensure_listener() -> None:
     global _listener
     if _listener is not None and _listener.running:
         return
-    _listener = _pk.Listener(on_press=_on_press, on_release=_on_release)
+    _listener = _pk.Listener(on_press=_on_press, on_release=_on_release,
+                             darwin_intercept=_intercept)
     _listener.daemon = True
     _listener.start()
     log.debug("pynput-Listener gestartet")

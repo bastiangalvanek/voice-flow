@@ -91,11 +91,13 @@ It decides **how** screenshots travel when the text is pasted:
 
 Click to switch. Default is Claude Code.
 
-### Wrong tab? Paste it again
+### Wrong tab? Just Cmd+V
 
-Click the right field and press **Cmd+Shift+V**. The whole last dictation goes in
-again: first the text, then every screenshot. Useful when a chat swallowed the
-attachments or you hit the wrong tab.
+In AI-Web mode, as long as your dictation is still the newest thing on the
+clipboard, a plain **Cmd+V** re-runs the whole cascade — first the text, then
+every screenshot. The moment you copy anything else, Cmd+V is instantly the
+normal paste again. **Cmd+Shift+V** does the same explicitly, in every mode,
+even after you copied something else in between.
 
 ### The pen right of the pill
 

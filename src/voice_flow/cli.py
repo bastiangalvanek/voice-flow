@@ -362,6 +362,10 @@ def main(argv: list[str] | None = None) -> int:
     keyboard.add_hotkey("esc", app.on_escape, suppress=False)
     # Letztes Diktat noch einmal einfuegen (Text, dann Bilder).
     keyboard.add_hotkey(cfg.repaste_hotkey, app.on_repaste_hotkey, suppress=False)
+    if sys.platform == "darwin":
+        # Einmal Cmd+V = ganze Kaskade (nur solange die Zwischenablage noch
+        # unsere Bilder traegt — sonst bleibt Cmd+V das normale Einfuegen).
+        keyboard.set_cmd_v_hook(app.on_cmd_v)
 
     log.info(
         "Bereit. %s %s zum Diktieren, %s zum Beenden.",

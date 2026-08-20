@@ -117,3 +117,83 @@ def test_wartet_bis_die_zusatztasten_los_sind(monkeypatch):
 
     assert gewartet == [True], "Ohne Warten kollidiert das Kuerzel mit dem Einfuegen"
     assert [art for art, _ in reihenfolge] == ["text"]
+
+
+# ---------- Cmd+V als Kaskade (20.08.) ----------
+
+
+def test_cmd_v_kaskadiert_nur_wenn_alles_stimmt():
+    """Ein faelschlich uebernommenes Cmd+V = "Einfuegen geht nicht mehr" —
+    der schlimmste Fehler dieses Features. Jede Abweichung -> native."""
+    from voice_flow.smart_paste import soll_kaskadieren
+
+    # Der einzige Ja-Fall: AI-Web, Diktat da, Zwischenablage unveraendert.
+    assert soll_kaskadieren("ai_web", True, 42, 42, False) is True
+
+    assert soll_kaskadieren("claude_code", True, 42, 42, False) is False
+    assert soll_kaskadieren("ai_web", False, 42, 42, False) is False
+    assert soll_kaskadieren("ai_web", True, 43, 42, False) is False, \
+        "Bastian hat etwas anderes kopiert — Cmd+V muss DAS einfuegen"
+    assert soll_kaskadieren("ai_web", True, None, 42, False) is False
+    assert soll_kaskadieren("ai_web", True, 42, None, False) is False
+    assert soll_kaskadieren("ai_web", True, 42, 42, True) is False, \
+        "das eigene Cmd+V der laufenden Kaskade darf nie gefangen werden"
+
+
+def test_on_cmd_v_kehrt_bei_fehler_immer_nativ_zurueck(monkeypatch):
+    """Wirft die Entscheidung, laeuft das native Einfuegen unangetastet."""
+    from voice_flow import smart_paste
+
+    app = VoiceFlowApp.__new__(VoiceFlowApp)
+    app.resolved_paste_mode = lambda: (_ for _ in ()).throw(RuntimeError("kaputt"))
+    assert app.on_cmd_v() is False
+
+    # Und: nicht scharf gestellt -> False, ohne Thread.
+    app.resolved_paste_mode = lambda: "ai_web"
+    app._letztes_diktat = {"text": "x", "shots": [], "captures": [], "duration": 1.0}
+    monkeypatch.setattr(smart_paste, "clipboard_stand", lambda: 7)
+    app._clipboard_stand = None
+    assert app.on_cmd_v() is False
+
+
+def test_on_cmd_v_uebernimmt_und_sperrt_sofort(monkeypatch):
+    """Uebernahme muss das Wiederholungs-Echo SOFORT sperren — nicht erst wenn
+    der Thread anlaeuft, sonst faengt das synthetische Cmd+V sich selbst."""
+    import threading as th
+
+    from voice_flow import smart_paste
+
+    app = VoiceFlowApp.__new__(VoiceFlowApp)
+    app.resolved_paste_mode = lambda: "ai_web"
+    app._letztes_diktat = {"text": "x", "shots": [], "captures": [], "duration": 1.0}
+    app._clipboard_stand = 7
+    monkeypatch.setattr(smart_paste, "clipboard_stand", lambda: 7)
+    gestartet: list = []
+    monkeypatch.setattr(th, "Thread",
+                        lambda **kw: types.SimpleNamespace(start=lambda: gestartet.append(kw)))
+
+    assert app.on_cmd_v() is True
+    assert app._kaskade_aktiv is True, "Sperre muss VOR dem Thread stehen"
+    assert len(gestartet) == 1
+    # Zweites Cmd+V waehrend die Kaskade laeuft: durchlassen.
+    assert app.on_cmd_v() is False
+
+
+def test_kaskade_merkt_sich_den_zwischenablage_stand(monkeypatch):
+    """Nur im AI-Web-Modus wird scharf gestellt; Claude Code entwaffnet."""
+    import voice_flow.app as app_mod
+    from voice_flow import smart_paste
+
+    monkeypatch.setattr(app_mod, "paste_to_active_window", lambda *a, **k: None)
+    monkeypatch.setattr(app_mod, "paste_files_to_active_window", lambda p: len(p))
+    monkeypatch.setattr(smart_paste, "clipboard_stand", lambda: 99)
+
+    app = VoiceFlowApp.__new__(VoiceFlowApp)
+    app.config = types.SimpleNamespace(enable_clipboard_restore=False)
+    app.overlay = None
+
+    app._kaskade_einfuegen("Text.", [], [], 1.0, target_mode.MODE_AI_WEB)
+    assert app._clipboard_stand == 99
+
+    app._kaskade_einfuegen("Text.", [], [], 1.0, target_mode.MODE_CLAUDE_CODE)
+    assert app._clipboard_stand is None

@@ -153,10 +153,28 @@ went along.
 
 The mode is remembered between runs.
 
+### Plain Cmd+V repeats the cascade (macOS)
+
+While your dictation is still the freshest thing on the clipboard, **a plain
+Cmd+V in AI-Web mode does not just paste the images — it re-runs the whole
+cascade**: first the text, then every screenshot, into whatever field you
+clicked. Wrong tab? Click the right one, Cmd+V, done.
+
+How Voice Flow dares to touch Cmd+V at all: macOS counts every clipboard
+change. After the cascade, Voice Flow remembers that counter. A Cmd+V is only
+taken over while the counter is unchanged — meaning the clipboard still holds
+*our* images. **The moment you copy anything else, Cmd+V is instantly 100%
+native again**, everywhere. If anything about the check fails, the answer is
+always "native" — pasting can never break.
+
+The running cascade's own Cmd+V key-presses are ignored by the check, so it
+cannot trigger itself. Windows keeps the explicit shortcut only (below), since
+the same safe interception is not available there.
+
 ### Paste it again — Cmd+Shift+V / Ctrl+Shift+V
 
-You clicked the wrong tab, the chat swallowed the attachments, or the page
-reloaded. Instead of dictating again:
+The explicit version, which works in **every** mode and even after you copied
+something else in between:
 
 **Click the right field, press Cmd+Shift+V (Windows: Ctrl+Shift+V).** The whole
 cascade runs again into that window — first the text, then all the images.
