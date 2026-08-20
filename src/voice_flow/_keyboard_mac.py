@@ -109,10 +109,24 @@ class _Event:
         self.name = name
 
 
+# Tasten, die der Sondertasten-Tap exklusiv bedient, sobald er laeuft.
+# 20.08 gemessen: ein F5 mit Keycode 96 (Fn-Variante, externe Tastatur,
+# synthetische Events) kam DOPPELT an — einmal ueber den pynput-Listener,
+# einmal ueber den Tap. Ergebnis: Toggle an+aus in 0,03 s, Aufnahme sofort
+# wieder gestoppt. Deshalb: laeuft der Tap, dispatcht NUR der Tap diese Tasten.
+_TAP_EXKLUSIV = {"f3", "f5", "f6"}
+
+
+def _tap_aktiv() -> bool:
+    return _media_tap._tap is not None
+
+
 def _on_press(key) -> None:
     _events_seen.set()
     name = _canonical(key)
     if name is None:
+        return
+    if name in _TAP_EXKLUSIV and _tap_aktiv():
         return
     with _lock:
         _pressed.add(name)
@@ -129,6 +143,8 @@ def _on_release(key) -> None:
     _events_seen.set()
     name = _canonical(key)
     if name is None:
+        return
+    if name in _TAP_EXKLUSIV and _tap_aktiv():
         return
     with _lock:
         _pressed.discard(name)

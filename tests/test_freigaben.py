@@ -251,3 +251,30 @@ def test_f3_bei_offener_zeichenebene_macht_das_foto_mit_zeichnung(monkeypatch):
 
     app.on_screenshot_hotkey()
     assert delegiert == [True]
+
+
+def test_f5_kommt_nur_einmal_an_wenn_der_tap_laeuft(monkeypatch):
+    """20.08 gemessen: F5 mit Keycode 96 kam ueber Listener UND Tap an —
+    Toggle an+aus in 0,03 s, jede Aufnahme starb sofort. Laeuft der Tap,
+    darf der Listener f3/f5/f6 nicht mehr dispatchen; ohne Tap muss er."""
+    pytest.importorskip("pynput")
+    from voice_flow import _keyboard_mac as km
+
+    feuer: list = []
+    monkeypatch.setattr(km, "_press_handlers",
+                        {"f5": [lambda ev: feuer.append(getattr(ev, "name", ev))]})
+    monkeypatch.setattr(km, "_hotkeys", [])
+    monkeypatch.setattr(km, "_hotkeys_armed", set())
+    monkeypatch.setattr(km, "_pressed", set())
+
+    class Taste:
+        pass
+    monkeypatch.setattr(km, "_canonical", lambda k: "f5")
+
+    monkeypatch.setattr(km._media_tap, "_tap", object())   # Tap laeuft
+    km._on_press(Taste())
+    assert feuer == [], "Tap laeuft -> Listener muss f5 dem Tap ueberlassen"
+
+    monkeypatch.setattr(km._media_tap, "_tap", None)       # Tap tot (z.B. keine Freigabe)
+    km._on_press(Taste())
+    assert feuer == ["f5"], "ohne Tap muss der Listener weiter liefern"

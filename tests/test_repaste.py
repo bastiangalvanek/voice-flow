@@ -255,3 +255,27 @@ def test_ab_fuenf_bildern_kommt_der_sende_hinweis(monkeypatch):
                            [(1.0, fuenf[0]), (2.0, fuenf[1])], 4.0,
                            target_mode.MODE_AI_WEB)
     assert hinweise == [], "bei 2 Bildern kein Hinweis-Spam"
+
+
+def test_cmd_v_im_eigenen_fenster_bleibt_nativ(monkeypatch):
+    """Ist Voice Flow selbst vorn (Kontrollfenster angeklickt), wuerde die
+    Kaskade ins eigene Fenster verpuffen — durchlassen (gemessen 20.08)."""
+    from voice_flow import smart_paste
+
+    app = VoiceFlowApp.__new__(VoiceFlowApp)
+    app.resolved_paste_mode = lambda: "ai_web"
+    app._letztes_diktat = {"text": "x", "shots": [], "captures": [], "duration": 1.0}
+    app._clipboard_stand = 7
+    monkeypatch.setattr(smart_paste, "clipboard_stand", lambda: 7)
+    monkeypatch.setattr(target_mode, "own_bundle_id", lambda: "de.galvanek.voiceflow")
+    monkeypatch.setattr(target_mode, "frontmost_bundle_id",
+                        lambda: "de.galvanek.voiceflow")
+
+    assert app.on_cmd_v() is False
+
+    monkeypatch.setattr(target_mode, "frontmost_bundle_id",
+                        lambda: "com.google.Chrome")
+    import threading as th
+    monkeypatch.setattr(th, "Thread",
+                        lambda **kw: types.SimpleNamespace(start=lambda: None))
+    assert app.on_cmd_v() is True

@@ -499,6 +499,12 @@ class VoiceFlowApp:
         try:
             from voice_flow import smart_paste
 
+            # Ist Voice Flow selbst die aktive App (Kontrollfenster angeklickt),
+            # ergibt eine Kaskade keinen Sinn: sie wuerde ins eigene Fenster
+            # verpuffen (gemessen 20.08, Prueflauf 15:03). Durchlassen.
+            eigen = target_mode.own_bundle_id()
+            if eigen and target_mode.frontmost_bundle_id() == eigen:
+                return False
             if not smart_paste.soll_kaskadieren(
                     self.resolved_paste_mode(),
                     bool(getattr(self, "_letztes_diktat", None)),
