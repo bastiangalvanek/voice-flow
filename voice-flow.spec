@@ -73,8 +73,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Voice Flow",
             "CFBundleDisplayName": "Voice Flow",
-            "CFBundleShortVersionString": "0.3.10",
-            "CFBundleVersion": "0.3.10",
+            "CFBundleShortVersionString": "0.3.11",
+            "CFBundleVersion": "0.3.11",
             "LSMinimumSystemVersion": "12.0",
             "NSHighResolutionCapable": True,
             # Ohne diese Texte verweigert macOS Mikrofon und Bildschirmfoto.
