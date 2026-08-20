@@ -35,3 +35,41 @@ def test_echtes_frequenz_limit_bleibt_retrybar():
 
 def test_leerer_fehler_ist_kein_guthaben_problem():
     assert _ist_guthaben_leer(FakeFehler()) is False
+
+
+def test_transcribe_meldet_guthaben_sofort_und_wartet_nicht(monkeypatch):
+    """Der echte Weg: transcribe() bekommt genau die 429 von OpenAI zurueck.
+
+    Geprueft wird beides — die richtige Ausnahme UND dass keine 20 Sekunden
+    verbraten werden. Der Fehlerkoerper ist woertlich der vom 20.08.2026.
+    """
+    import time
+
+    import httpx
+    from openai import RateLimitError
+
+    from voice_flow import transcription as tr
+
+    koerper = {"error": {"message": "You have no credits remaining.",
+                         "type": "insufficient_quota", "param": None,
+                         "code": "credit_balance_exhausted"}}
+    antwort = httpx.Response(
+        429, request=httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions"),
+        json=koerper)
+
+    t = tr.Transcriber(api_key="sk-test", model="whisper-1")
+
+    def wirft(*_a, **_k):
+        raise RateLimitError("429", response=antwort, body=koerper)
+
+    monkeypatch.setattr(t, "_create_with_hedge", wirft)
+    monkeypatch.setattr(tr, "to_opus", lambda _b: None)
+
+    t0 = time.monotonic()
+    try:
+        t.transcribe(b"RIFF" + b"\x00" * 4000, language="de")
+    except tr.TranscriberQuotaError as ex:
+        assert "Guthaben" in str(ex)
+    else:
+        raise AssertionError("TranscriberQuotaError wurde nicht ausgeloest")
+    assert time.monotonic() - t0 < 1.0, "es wurde trotzdem gewartet/wiederholt"
