@@ -20,6 +20,7 @@ import logging
 import time
 
 from voice_flow.target_mode import icon_path
+from voice_flow.window_order import nach_vorne
 from voice_flow.target_mode import label as mode_label
 
 log = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ def build_mode_chip_class():
             self._pill_rect = tuple(pill_rect)
             self._move_beside(self._pill_rect)
             self.show()
-            self.raise_()
+            nach_vorne(self)
 
         def _load_icon(self, mode: str):
             """Modus-Icon laden und auf Chip-Hoehe bringen (harte Pixelkanten)."""
@@ -198,7 +199,8 @@ def build_mode_chip_class():
 PEN_BUTTON_SIZE = 34
 # 18.08 Bastian: "es soll hier angedockt sein". Der Knopf sitzt direkt an der
 # Pillenkante. Dass er trotz des 24px breiten Schatten-Fensters der Pille Klicks
-# bekommt, sichert das raise_() beim Platzieren.
+# bekommt, sichert nach_vorne() beim Platzieren (orderFront statt raise_,
+# sonst klaut das Platzieren den Fokus — gemessen 20.08.).
 PEN_BUTTON_GAP = 6
 
 
@@ -243,7 +245,7 @@ def build_pen_button_class():
             px, py, pw, ph = pill_rect
             self.move(px + pw + PEN_BUTTON_GAP, py + (ph - PEN_BUTTON_SIZE) // 2)
             self.show()
-            self.raise_()
+            nach_vorne(self)
 
         def mousePressEvent(self, event) -> None:
             if event.button() != Qt.MouseButton.LeftButton or self._on_click is None:

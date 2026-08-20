@@ -21,6 +21,7 @@ from collections.abc import Callable
 from PIL import Image, ImageDraw
 
 from voice_flow.shape_snap import snap
+from voice_flow.window_order import nach_vorne
 from voice_flow.annotate_toolbar import (  # noqa: F401
     is_enabled,
     STROKE_COLOR,
@@ -201,7 +202,7 @@ def build_annotate_class():
 
 
             self.show()
-            self.raise_()
+            nach_vorne(self)
             # KEIN activateWindow(): das aktiviert die App Voice Flow, und macOS
             # holt dabei das Kontrollfenster wieder hervor.
             # 19.08 Bastian: "wenn ich es minimiere, soll es minimiert bleiben".
