@@ -695,6 +695,14 @@ class RecordingOverlay:
         if self._control is not None:
             self._control.set_devices(devices, selected_name, on_select)
 
+    def shoot_annotate(self) -> bool:
+        """F3 bei offener Zeichenebene: Foto mit Zeichnung. True wenn offen war."""
+        bruecke = getattr(self, "_annotate_bridge", None)
+        if bruecke is None or bruecke._overlay is None:
+            return False
+        bruecke.sig_shoot.emit()
+        return True
+
     def close_annotate(self) -> bool:
         """ESC: offene Zeichen-Ebene schliessen. True wenn eine offen war."""
         bruecke = getattr(self, "_annotate_bridge", None)
@@ -881,6 +889,7 @@ def _build_annotate_bridge_class():
     class AnnotateBridge(QObject):
         sig_open = pyqtSignal(object, object)  # (monitor: dict, on_shoot: Callable)
         sig_close = pyqtSignal()               # ESC vom globalen Tastatur-Listener
+        sig_shoot = pyqtSignal()               # F3 waehrend die Ebene offen ist
 
         def __init__(self):
             super().__init__()
@@ -888,6 +897,16 @@ def _build_annotate_bridge_class():
             self._last_open = 0.0
             self.sig_open.connect(self._on_open, Qt.ConnectionType.QueuedConnection)
             self.sig_close.connect(self._on_close, Qt.ConnectionType.QueuedConnection)
+            self.sig_shoot.connect(self._on_shoot_request, Qt.ConnectionType.QueuedConnection)
+
+        def _on_shoot_request(self):
+            """F3 bei offener Zeichenebene: das Foto MIT Zeichnung machen."""
+            if self._overlay is None:
+                return
+            try:
+                self._overlay._shoot()
+            except Exception as ex:
+                log.error("Annotate-Shoot per F3 fehlgeschlagen: %s", ex)
 
         def _on_close(self):
             """Zeichen-Ebene schliessen, ohne die App zu aktivieren.
@@ -918,8 +937,16 @@ def _build_annotate_bridge_class():
                 return
             self._last_open = now
             if self._overlay is not None:
+                from voice_flow.annotate import f6_zweiter_druck
+
+                ov = self._overlay
+                hat_zeichnung = bool(getattr(ov, "_strokes", None)) or \
+                    getattr(ov, "_current", None) is not None
                 try:
-                    self._overlay.close()  # closeEvent -> _clear_overlay -> _overlay=None
+                    if f6_zweiter_druck(hat_zeichnung) == "shoot":
+                        ov._shoot()      # Foto MIT Zeichnung, schliesst selbst
+                    else:
+                        ov.close()       # nichts gezeichnet -> zu (wie bisher)
                 except Exception:
                     self._overlay = None
                 return

@@ -217,6 +217,21 @@ appears, and you can draw.
 | **Camera** | Captures the screen **including** your drawings |
 | **X** | Cancels without capturing |
 
+### Finishing with the keyboard
+
+You never have to reach for the camera button:
+
+- **F6 again** (or F3, Windows: F7) while you have drawn something — takes the
+  photo **with** your drawing and closes the layer. The same key that opens the
+  drawing finishes it.
+- **F6 again with nothing drawn** — just closes the layer.
+- **ESC** — always cancels without a photo.
+
+It used to be the other way round (F6 again = cancel), and that silently threw
+a finished drawing away the moment you asked for the photo. Real incident,
+20 August: draw → F6 ("take it") → drawing discarded → F3 delivered a naked
+screenshot.
+
 ### Shape snapping
 
 Rough freehand becomes a clean shape when you release the mouse: a scribbled

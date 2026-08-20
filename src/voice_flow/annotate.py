@@ -71,6 +71,18 @@ def _draw_arrow_head(draw: ImageDraw.ImageDraw, p0: tuple[int, int],
         draw.line([p1, end], fill=color, width=width)
 
 
+def f6_zweiter_druck(hat_zeichnung: bool) -> str:
+    """Was passiert, wenn F6 gedrueckt wird, waehrend die Ebene schon offen ist?
+
+    20.08 Bastian: gezeichnet, F6 gedrueckt (gemeint: "jetzt das Foto"), dann
+    F3 — die Zeichnung war weg, weil F6-nochmal als ABBRECHEN gebaut war.
+    Protokoll 14:36:45-50 zeigt den Ablauf sekundengenau. Die Intuition ist:
+    dieselbe Taste, die das Zeichnen oeffnet, macht auch das Foto. Abbrechen
+    bleibt auf ESC (und auf F6, wenn noch gar nichts gezeichnet wurde).
+    """
+    return "shoot" if hat_zeichnung else "close"
+
+
 def composite_strokes(img: Image.Image, strokes: list,
                       scale: tuple[float, float],
                       origin: tuple[int, int]) -> Image.Image:

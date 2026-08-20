@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 
@@ -20,15 +21,6 @@ from voice_flow.recording_storage import (
     save_recording,
 )
 from voice_flow.settings import Settings
-
-# 20.08: 13 Bilder kamen bei Lovable nicht an, obwohl "eingefuegt" gemeldet war.
-# Der Text (130 Woerter) und die Dateiliste trafen nur 0,42 s auseinander ein —
-# waehrend ein Web-Editor den Text-Paste noch verarbeitet, kann er den
-# Datei-Paste verschlucken. Diese Pause gibt der Web-App Luft. Sie kostet nur
-# im AI-Web-Modus mit Bildern Zeit und ist per .env justierbar.
-import os as _os
-
-WEB_BILDER_PAUSE_SEC = float(_os.getenv("VOICE_FLOW_WEB_BILDER_PAUSE", "1.2"))
 from voice_flow import target_mode
 from voice_flow.sound import beep_error, beep_ready, beep_start, beep_stop
 from voice_flow.transcript_history import append_transcript
@@ -37,6 +29,13 @@ from voice_flow.transcript_weave import weave_screenshot_markers
 from voice_flow.transcription import Transcriber, TranscriberAuthError
 
 log = logging.getLogger(__name__)
+
+# 20.08: 13 Bilder kamen bei Lovable nicht an, obwohl "eingefuegt" gemeldet war.
+# Der Text (130 Woerter) und die Dateiliste trafen nur 0,42 s auseinander ein —
+# waehrend ein Web-Editor den Text-Paste noch verarbeitet, kann er den
+# Datei-Paste verschlucken. Diese Pause gibt der Web-App Luft. Sie kostet nur
+# im AI-Web-Modus mit Bildern Zeit und ist per .env justierbar.
+WEB_BILDER_PAUSE_SEC = float(os.getenv("VOICE_FLOW_WEB_BILDER_PAUSE", "1.2"))
 
 
 class VoiceFlowApp:
@@ -390,6 +389,15 @@ class VoiceFlowApp:
         """F7: Monitor unter der Maus grabben, in den Session-Bucket legen, Toast zeigen."""
         from voice_flow.screenshot import grab_monitor_under_cursor
 
+        # Zeichenebene offen? Dann meint die Screenshot-Taste "Foto MIT
+        # Zeichnung", nicht einen nackten Screenshot daneben (20.08: die
+        # Zeichnung ging genau so verloren, Protokoll 14:36:45-50).
+        if self.overlay:
+            try:
+                if self.overlay.shoot_annotate():
+                    return
+            except Exception as ex:
+                log.debug("F3-Delegation an die Zeichenebene: %s", ex)
         if not self._bildschirm_freigabe_ok():
             return
         sess = self._ensure_session()

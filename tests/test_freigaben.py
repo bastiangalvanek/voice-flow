@@ -226,3 +226,28 @@ def test_fehlstarts_faerben_die_anzeige_nicht_rot(tmp_path, monkeypatch):
     cls = build_control_window_class()
     fenster = cls.__new__(cls)
     assert cls._offene_transkripte(fenster) == 1
+
+
+def test_f6_nochmal_macht_das_foto_statt_die_zeichnung_wegzuwerfen():
+    """20.08, Protokoll 14:36:45-50: gezeichnet, F6 gedrueckt (gemeint: Foto),
+    Zeichnung verworfen, F3 lieferte den nackten Screenshot. Ab jetzt gilt:
+    dieselbe Taste, die das Zeichnen oeffnet, macht mit Zeichnung das Foto."""
+    from voice_flow.annotate import f6_zweiter_druck
+
+    assert f6_zweiter_druck(hat_zeichnung=True) == "shoot"
+    assert f6_zweiter_druck(hat_zeichnung=False) == "close"
+
+
+def test_f3_bei_offener_zeichenebene_macht_das_foto_mit_zeichnung(monkeypatch):
+    """F3 waehrend des Zeichnens darf keinen nackten Screenshot daneben legen."""
+    from voice_flow.app import VoiceFlowApp
+
+    app = VoiceFlowApp.__new__(VoiceFlowApp)
+    delegiert: list = []
+    app.overlay = types.SimpleNamespace(
+        shoot_annotate=lambda: (delegiert.append(True), True)[1])
+    app._bildschirm_freigabe_ok = lambda: pytest.fail(
+        "F3 haette an die Zeichenebene gehen muessen, nicht in den Grab-Pfad")
+
+    app.on_screenshot_hotkey()
+    assert delegiert == [True]
