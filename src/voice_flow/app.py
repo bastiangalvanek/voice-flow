@@ -26,7 +26,11 @@ from voice_flow.sound import beep_error, beep_ready, beep_start, beep_stop
 from voice_flow.transcript_history import append_transcript
 from voice_flow.transcript_quality import is_suspect_transcription
 from voice_flow.transcript_weave import weave_screenshot_markers
-from voice_flow.transcription import Transcriber, TranscriberAuthError
+from voice_flow.transcription import (
+    Transcriber,
+    TranscriberAuthError,
+    TranscriberQuotaError,
+)
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +81,7 @@ class VoiceFlowApp:
         self.tray = None  # wird vom CLI nach Konstruktion gesetzt
         # Auth-Error-Flag unter Lock (Critic P2-24: sonst race bei schnellem Double-F8).
         self._auth_error_shown = False
+        self._quota_error_shown = False
         # Eigener Hotkey-Down-Tracker, unabhaengig vom State (Critic P1-7).
         # Verhindert dass Windows-Typematic-Repeats erneute Press-Events feuern.
         self._hotkey_down = False
@@ -792,6 +797,28 @@ class VoiceFlowApp:
                     duration_ms=4500,
                 )
 
+        except TranscriberQuotaError as ex:
+            # 20.08 Bastian: "warum ins limit, weil datei zu gross?" — nein, das
+            # Guthaben war leer. Deshalb steht das jetzt woertlich da, statt dass
+            # die Aufnahme still als "failed" im Ordner landet.
+            log.error("Guthaben aufgebraucht: %s", ex)
+            if self.config.enable_sound:
+                beep_error()
+            if self.overlay:
+                self.overlay.show_info(
+                    "Kein OpenAI-Guthaben mehr — Aufnahme ist gesichert, "
+                    "Text kommt nach dem Aufladen.", 8000)
+                # Der finally-Zweig darf diese Meldung nicht durch das viel
+                # unschaerfere "Aufnahme gesichert" ersetzen.
+                success_shown = True
+            with self._state_lock:
+                if not self._quota_error_shown:
+                    self._quota_error_shown = True
+                    threading.Thread(
+                        target=show_error,
+                        args=("Voice Flow — OpenAI-Guthaben aufgebraucht", str(ex)),
+                        daemon=True,
+                    ).start()
         except TranscriberAuthError as ex:
             log.error("Auth-Fehler: %s", ex)
             if self.config.enable_sound:

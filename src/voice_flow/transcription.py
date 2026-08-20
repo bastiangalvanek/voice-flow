@@ -42,6 +42,38 @@ class TranscriberAuthError(RuntimeError):
     """Raised when OpenAI rejects the API key (401). Not retryable."""
 
 
+class TranscriberQuotaError(RuntimeError):
+    """Guthaben bei OpenAI aufgebraucht — kommt als 429, ist aber KEIN Limit.
+
+    20.08.2026 gemessen: OpenAI antwortet mit 429 und
+    {"type": "insufficient_quota", "code": "credit_balance_exhausted",
+     "message": "You have no credits remaining."} — ohne x-ratelimit-Koepfe und
+    ohne retry-after. Die letzte erfolgreiche Anfrage davor meldete noch
+    9999 von 10000 freien Anfragen: an der Frequenz lag es also nicht.
+
+    Vorher lief das in den Rate-Limit-Zweig: 20 Sekunden warten, neu versuchen,
+    aufgeben — und im Protokoll stand "rate-limited". Wer das liest, sucht an
+    der falschen Stelle (Dateigroesse, zu schnell diktiert) statt aufzuladen.
+    """
+
+
+def _ist_guthaben_leer(ex) -> bool:
+    """429 von OpenAI: leeres Guthaben oder echtes Frequenz-Limit?"""
+    for feld in ("code", "type"):
+        wert = getattr(ex, feld, None)
+        if isinstance(wert, str) and wert in (
+                "insufficient_quota", "credit_balance_exhausted"):
+            return True
+    koerper = getattr(ex, "body", None)
+    if isinstance(koerper, dict):
+        fehler = koerper.get("error") or {}
+        if isinstance(fehler, dict) and (
+                fehler.get("type") == "insufficient_quota"
+                or fehler.get("code") == "credit_balance_exhausted"):
+            return True
+    return False
+
+
 class Transcriber:
     """OpenAI Audio Transcription API Wrapper mit selektivem Retry.
 
@@ -55,7 +87,11 @@ class Transcriber:
     """
 
     def __init__(self, api_key: str, model: str = "whisper-1"):
-        self.client = OpenAI(api_key=api_key)
+        # max_retries=0: das SDK wiederholt sonst NOCH einmal zusaetzlich zu
+        # unserer eigenen Schleife. Gemessen 20.08.: ein einziges Diktat erzeugte
+        # so 9 Anfragen in 8 Sekunden (3 eigene Versuche x 3 SDK-Versuche) —
+        # bei einem echten Frequenz-Limit macht genau das es schlimmer.
+        self.client = OpenAI(api_key=api_key, max_retries=0)
         self.model = model
 
     def _supports_prompt_as_vocab_hint(self) -> bool:
@@ -142,6 +178,15 @@ class Transcriber:
                 ) from ex
 
             except RateLimitError as ex:
+                if _ist_guthaben_leer(ex):
+                    log.error("OpenAI-Guthaben aufgebraucht — kein Retry: %s", ex)
+                    raise TranscriberQuotaError(
+                        "Bei OpenAI ist kein Guthaben mehr uebrig — das Diktat "
+                        "kann nicht verschriftet werden.\n\n"
+                        "Aufladen unter platform.openai.com > Billing. Die "
+                        "Aufnahme bleibt gespeichert und kann danach ueber "
+                        "\u201eFehlende Transkripte nachholen\u201c geholt werden."
+                    ) from ex
                 # Critic P1-11: Retry-After-Header honorieren wenn OpenAI ihn sendet
                 last_err = ex
                 wait = DEFAULT_RATE_LIMIT_WAIT_SEC
