@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 import time
+import webbrowser
 
 from voice_flow.audio import AudioRecorder, list_input_devices
 from voice_flow.audio_mute import SystemAudioMute
@@ -40,6 +41,9 @@ log = logging.getLogger(__name__)
 # Datei-Paste verschlucken. Diese Pause gibt der Web-App Luft. Sie kostet nur
 # im AI-Web-Modus mit Bildern Zeit und ist per .env justierbar.
 WEB_BILDER_PAUSE_SEC = float(os.getenv("VOICE_FLOW_WEB_BILDER_PAUSE", "1.2"))
+
+# Direktlink zum Aufladen — Ziel des "OpenAI aufladen"-Knopfs im Guthaben-Toast.
+OPENAI_BILLING_URL = "https://platform.openai.com/settings/organization/billing/"
 
 
 class VoiceFlowApp:
@@ -804,10 +808,7 @@ class VoiceFlowApp:
             log.error("Guthaben aufgebraucht: %s", ex)
             if self.config.enable_sound:
                 beep_error()
-            if self.overlay:
-                self.overlay.show_info(
-                    "Kein OpenAI-Guthaben mehr — Aufnahme ist gesichert, "
-                    "Text kommt nach dem Aufladen.", 8000)
+            if self._show_quota_error():
                 # Der finally-Zweig darf diese Meldung nicht durch das viel
                 # unschaerfere "Aufnahme gesichert" ersetzen.
                 success_shown = True
@@ -848,6 +849,32 @@ class VoiceFlowApp:
                     )
                     success_shown = True  # damit reset_state das overlay nicht killt
             self._reset_state(error=False, keep_overlay=success_shown)
+
+    def _show_quota_error(self) -> bool:
+        """Guthaben leer: Pille + roter Toast mit Aufladen-Knopf, bei JEDEM Diktat.
+
+        20.08 Bastian: "das muss immer laufen". Das native Fehlerfenster
+        (gui_errors.show_error) existiert nur unter Windows; auf dem Mac war
+        nach 8 s Pillen-Text nichts mehr sichtbar. Der Toast kommt deshalb
+        ungedrosselt bei jedem betroffenen Diktat und traegt den Klick-Weg
+        zum Aufladen gleich mit. Rueckgabe: ob die Pille die Meldung zeigt
+        (steuert success_shown im Aufrufer).
+        """
+        if not self.overlay:
+            return False
+        self.overlay.show_info(
+            "Kein OpenAI-Guthaben, Aufnahme ist gesichert. "
+            "Text kommt nach dem Aufladen.", 8000)
+        from voice_flow.notifications import ToastKind
+        self.overlay.notify(
+            ToastKind.ERROR,
+            "OpenAI-Guthaben aufgebraucht",
+            "Aufnahme gesichert, Text nach Aufladen",
+            actions=[("OpenAI aufladen",
+                      lambda: webbrowser.open(OPENAI_BILLING_URL))],
+            duration_ms=8000,
+        )
+        return True
 
     def _whisper_prompt(self) -> str | None:
         """Erste 220 Zeichen des ersten Context-Blocks als Whisper-Prompt.
