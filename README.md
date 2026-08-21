@@ -264,3 +264,9 @@ apps/tools/voice-flow/
 ├── voice-flow.ico          # generiert, in .gitignore
 └── galvanek_context.txt    # Custom-Vokabular
 ```
+
+## Lizenz
+
+[PolyForm Noncommercial 1.0.0](LICENSE): private und nicht-kommerzielle Nutzung, Änderung und Weitergabe sind erlaubt. Jede kommerzielle Nutzung (insbesondere Verkauf oder Einsatz in einem kommerziellen Produkt/Dienst) ist nicht gestattet.
+
+Required Notice: Copyright (c) 2026 Bastian Galvanek (https://github.com/bastiangalvanek/voice-flow)

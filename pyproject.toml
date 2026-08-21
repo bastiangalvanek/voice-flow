@@ -9,7 +9,7 @@ description = "Push-to-Talk Diktat-Tool: F8 halten, sprechen, Text im aktiven Fe
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Bastian Galvanek" }]
-license = { text = "MIT" }
+license = { text = "PolyForm-Noncommercial-1.0.0" }
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Win32 (MS Windows)",
