@@ -45,7 +45,13 @@ def test_transcribe_meldet_guthaben_sofort_und_wartet_nicht(monkeypatch):
     """
     import time
 
-    import httpx
+    # openai>=3 liefert httpx2 mit, aeltere Versionen httpx. Wir bauen die
+    # 429-Antwort mit GENAU der Bibliothek, die das installierte openai nutzt —
+    # sonst faellt der Test ueber einen fehlenden Import statt ueber die Sache.
+    try:
+        import httpx2 as httpx
+    except ModuleNotFoundError:
+        import httpx
     from openai import RateLimitError
 
     from voice_flow import transcription as tr
