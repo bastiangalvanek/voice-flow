@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from voice_flow.notifications import ToastSpec, style_for, truncate
+from voice_flow.window_order import nach_vorne
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ def build_toast_class():
         def animate_in(self, target: QPoint):
             self.move(target.x(), target.y())
             self.show()
+            nach_vorne(self)  # sonst verdeckt ein fremdes Topmost-Fenster den Toast
             self.setWindowOpacity(0.0)
             self._anim = QPropertyAnimation(self, b"windowOpacity")
             self._anim.setDuration(190)
