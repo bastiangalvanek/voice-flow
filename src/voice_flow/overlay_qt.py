@@ -30,6 +30,7 @@ from collections import deque
 from typing import Callable, Optional
 
 from voice_flow.logo_loader import resolve_logo_path
+from voice_flow.window_order import nach_vorne
 
 log = logging.getLogger(__name__)
 
@@ -301,6 +302,10 @@ def _build_qt_class(QWidget, QApplication, Qt, QPainter, QColor, QFont, QRect, Q
 
             self._position_centered_bottom()
             self.show()
+            # Chip und Stift holen sich nach vorne, die Pille muss es auch: ein
+            # anderes "immer im Vordergrund"-Fenster (Claude-App, 30.09.) legte
+            # sich sonst zwischen sie — Chip und Stift sichtbar, Pille verdeckt.
+            nach_vorne(self)
             self.update()
             self._render_timer.start()
             self._notify_chip(self.visible_pill_rect())
