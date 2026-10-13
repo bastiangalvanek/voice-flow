@@ -73,6 +73,7 @@ class VoiceFlowApp:
         )
         # 13.10.2026: erst OpenAI, scheitert das, die Grafikkarte (local_transcription).
         self.transcriber = build_transcriber(config)
+        self.transcriber.vorwaermen_im_hintergrund()
         self.cleaner = Cleaner(
             api_key=config.anthropic_api_key if config.enable_cleanup else None,
             model=config.cleanup_model,

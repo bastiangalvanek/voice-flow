@@ -21,11 +21,12 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from voice_flow.audio_chunks import wav_duration_seconds
 from voice_flow.config import PROJECT_ROOT, Config
-from voice_flow.transcription import Transcriber
+from voice_flow.transcription import Transcriber, TranscriberAuthError, TranscriberQuotaError
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,15 @@ TIMEOUT_PER_AUDIO_SEC = 0.5
 # die Abweichung von 11,7 % auf 20,3 % (Wiederholungsschleifen, fremde Schrift);
 # 15 Begriffe als hotwords ohne Vortext-Bindung: 11,2 %, ChatGPT/CleverPV richtig.
 VOCAB_HEADER = "Lokale Wortliste"
+
+# Erstes Live-Diktat 13.10. 22:07 brauchte 8,4 s: 3,0 s bis OpenAI ablehnte, 4,1 s
+# Modell laden, 1,3 s Erkennung. Deshalb: Modell beim App-Start vorladen, und nach
+# "Guthaben leer"/"Key abgelehnt" OpenAI eine Weile gar nicht erst fragen — beides
+# aendert sich nicht von einem Diktat zum naechsten. Netzfehler pausieren nicht.
+# Bastian 13.10.: "nach Guthaben leer einfach einen Tag spaeter erst wieder".
+# Ein Neustart von Voice Flow (z. B. nach dem Aufladen) hebt die Pause auf.
+OPENAI_PAUSE_SEC = 24 * 60 * 60
+OPENAI_PAUSE_FEHLER = (TranscriberQuotaError, TranscriberAuthError)
 
 
 def _venv_python(venv: Path) -> Path:
@@ -142,6 +152,12 @@ class LocalTranscriber:
         log.info("LOKAL  %.1fs Audio in %.1fs", antwort.get("audio_s", 0), antwort.get("seconds", 0))
         return antwort.get("text", "")
 
+    def vorwaermen(self) -> None:
+        """Worker starten und Modell laden, damit der erste Ersatz-Einsatz nicht wartet."""
+        with self._lock:
+            if self._proc is None or self._proc.poll() is not None:
+                self._starten()
+
     def stop(self) -> None:
         proc, self._proc = self._proc, None
         if proc is not None and proc.poll() is None:
@@ -166,6 +182,24 @@ class FallbackTranscriber:
         self.mode = mode
         self.last_engine = "openai"
         self.last_fallback_reason: str | None = None
+        self._openai_pause_bis = 0.0
+        self._pause_grund: str | None = None
+
+    @property
+    def local_ready(self) -> bool:
+        return self.mode != "aus" and self.local is not None and self.local.available
+
+    def vorwaermen_im_hintergrund(self) -> None:
+        if not self.local_ready:
+            return
+
+        def los() -> None:
+            try:
+                self.local.vorwaermen()
+            except Exception as ex:  # noqa: BLE001 - nicht fatal, beim ersten Einsatz wird neu gestartet
+                log.warning("LOKAL  Vorladen fehlgeschlagen (%s) — startet beim ersten Einsatz neu.", ex)
+
+        threading.Thread(target=los, daemon=True, name="lokal-stt-vorladen").start()
 
     @property
     def model(self) -> str:
@@ -180,6 +214,13 @@ class FallbackTranscriber:
         self.last_engine, self.last_fallback_reason = "openai", None
         if self.mode == "lokal" and self.local is not None:
             return self._lokal(wav_bytes, language)
+        if self.local_ready and time.monotonic() < self._openai_pause_bis:
+            try:
+                text = self._lokal(wav_bytes, language)
+                self.last_fallback_reason = self._pause_grund
+                return text
+            except Exception as ex:  # noqa: BLE001 - dann eben doch OpenAI fragen
+                log.error("LOKAL  fehlgeschlagen waehrend OpenAI-Pause (%s) — frage OpenAI.", ex)
         try:
             return self.primary.transcribe(wav_bytes, language=language, prompt=prompt)
         except ValueError:
@@ -188,6 +229,9 @@ class FallbackTranscriber:
             if self.mode != "fallback" or self.local is None or not self.local.available:
                 raise
             self.last_fallback_reason = type(ex).__name__
+            if isinstance(ex, OPENAI_PAUSE_FEHLER):
+                self._openai_pause_bis = time.monotonic() + OPENAI_PAUSE_SEC
+                self._pause_grund = self.last_fallback_reason
             log.warning("LOKAL  OpenAI fehlgeschlagen (%s) — verschrifte auf der Grafikkarte.",
                         self.last_fallback_reason)
             try:

@@ -99,8 +99,8 @@ def test_modus_lokal_fragt_openai_gar_nicht():
     assert t.last_fallback_reason is None  # kein Ausfall, sondern gewollt
 
 
-def test_nach_einem_ausfall_meldet_das_naechste_diktat_wieder_openai():
-    openai = FakeOpenAI(TranscriberQuotaError("leer"))
+def test_nach_einem_netzausfall_meldet_das_naechste_diktat_wieder_openai():
+    openai = FakeOpenAI(RuntimeError("Whisper API failed after 3 attempts"))
     t = FallbackTranscriber(openai, FakeLokal())
     t.transcribe(WAV)
     openai.fehler = None
@@ -128,3 +128,38 @@ def test_abschnitte_bekommen_an_der_sprechpause_einen_punkt():
     assert _segmente_verbinden([" die sehen scheisse aus", " Die ist geil, die Stange", " und weiter."]) == \
         "die sehen scheisse aus. Die ist geil, die Stange und weiter."
     assert _segmente_verbinden(["Schon fertig.", " Neuer Satz", "", " "]) == "Schon fertig. Neuer Satz"
+
+
+def test_nach_leerem_guthaben_wird_openai_eine_weile_uebersprungen(monkeypatch):
+    """Live 13.10. 22:07: 3,0 s von 8,4 s gingen nur fuers Abwarten der OpenAI-Absage drauf."""
+    from voice_flow import local_transcription as lt
+
+    jetzt = [1000.0]
+    monkeypatch.setattr(lt.time, "monotonic", lambda: jetzt[0])
+    openai, lokal = FakeOpenAI(TranscriberQuotaError("leer")), FakeLokal()
+    t = FallbackTranscriber(openai, lokal)
+    t.transcribe(WAV)
+    assert openai.aufrufe == 1
+    t.transcribe(WAV)  # innerhalb der Pause: OpenAI wird nicht gefragt
+    assert (openai.aufrufe, lokal.aufrufe) == (1, 2)
+    assert (t.last_engine, t.last_fallback_reason) == ("lokal", "TranscriberQuotaError")
+    jetzt[0] += lt.OPENAI_PAUSE_SEC + 1
+    openai.fehler = None
+    assert t.transcribe(WAV) == "von OpenAI"  # nach der Pause wieder OpenAI zuerst
+
+
+def test_netzfehler_pausiert_openai_nicht():
+    openai = FakeOpenAI(RuntimeError("Whisper API failed after 3 attempts"))
+    t = FallbackTranscriber(openai, FakeLokal())
+    t.transcribe(WAV)
+    t.transcribe(WAV)
+    assert openai.aufrufe == 2
+
+
+def test_scheitert_lokal_in_der_pause_wird_doch_openai_gefragt(monkeypatch):
+    openai, lokal = FakeOpenAI(TranscriberAuthError("gesperrt")), FakeLokal()
+    t = FallbackTranscriber(openai, lokal)
+    t.transcribe(WAV)
+    lokal.fehler, openai.fehler = RuntimeError("GPU weg"), None
+    assert t.transcribe(WAV) == "von OpenAI"
+    assert openai.aufrufe == 2
