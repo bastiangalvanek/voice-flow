@@ -8,9 +8,11 @@ Tools und Plattformen: ClickUp, Zoho CRM, Zoho Blueprint, Supabase, n8n, Lovable
 
 Tech-Begriffe: Edge Function, RLS, RPC, Migration, Bucket, JWT, Webhook, Cron, pg_cron, DKIM, Inbox, Lead, Deal, Stage, Pipeline, Conversion, CR, Provision, Booking, Slot, Capacity.
 
-Fachbegriffe Heizung und Energie: Waermepumpe, WP, Photovoltaik, PV, Wartungsvertrag, BEG-EM, BAFA, KfW, R290, Propan, Vitocal, Viessmann, Daikin, Buderus, COP, JAZ, Pufferspeicher, Warmwasserspeicher, WW-Speicher, Fussbodenheizung, FBH, Heizkoerper, HK, Mischer, MIX, Verdichter, Schallschutz, Aufstellort, Zaehlerschrank, Bypass, Erdung, VDE0100-540, Hydraulik, Hydraulischer Abgleich.
+Fachbegriffe Heizung und Energie: Wärmepumpe, WP, Photovoltaik, PV, Wartungsvertrag, BEG-EM, BAFA, KfW, R290, Propan, Vitocal, Viessmann, Daikin, Buderus, COP, JAZ, Pufferspeicher, Warmwasserspeicher, WW-Speicher, Fußbodenheizung, FBH, Heizkörper, HK, Mischer, MIX, Verdichter, Schallschutz, Aufstellort, Zählerschrank, Bypass, Erdung, VDE0100-540, Hydraulik, Hydraulischer Abgleich.
 
 Begriffe Bastian-Stil: Lovable, Critic, Subagent, Skill, Memory, MCP, Wispr, Whisper, Voice Flow.
+
+Lokale Wortliste (nur fuer die Grafikkarten-Erkennung; hoechstens ~20 Begriffe - die 700-Zeichen-Liste erzeugte am 13.10. Halluzinationen): ChatGPT, Claude, CleverPV, SalesOS, HeatPump Hub, Vitocal, Viessmann, Kaskade, Kinderartikel, Leistungsverzeichnis, Supabase, Lovable, ClickUp, Galvanek, Digga
 
 Schreibweise:
 - Wenn ich "Hennes" oder "Hermes" sage und es geht um meinen Bot, schreibe "Hermes".

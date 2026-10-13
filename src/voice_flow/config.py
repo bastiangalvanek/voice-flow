@@ -50,6 +50,11 @@ class Config:
     # gpt-4o-mini-transcribe ist ~4x schneller als whisper-1 bei vergleichbarer
     # Qualitaet fuer Sprache. Default nach Bastians "schneller"-Wunsch (16.05).
     whisper_model: str = "gpt-4o-mini-transcribe"
+    # 13.10.2026 Bastian: OpenAI-Guthaben leer, zwei Diktate verloren. Scheitert
+    # OpenAI, verschriftet large-v3-turbo auf der Grafikkarte (local_transcription).
+    # "fallback" (Standard) | "lokal" (nur Grafikkarte) | "aus" (nur OpenAI).
+    local_stt: str = "fallback"
+    local_stt_model: str = "large-v3-turbo"
     cleanup_model: str = "claude-haiku-4-5-20251001"
     sample_rate: int = 16000
     channels: int = 1
@@ -114,6 +119,8 @@ def load_config(overrides: dict | None = None) -> Config:
             "cmd+shift+v" if sys.platform == "darwin" else "ctrl+shift+v"),
         language=os.getenv("VOICE_FLOW_LANGUAGE", "de"),
         whisper_model=os.getenv("VOICE_FLOW_WHISPER_MODEL", "gpt-4o-mini-transcribe"),
+        local_stt=os.getenv("VOICE_FLOW_LOCAL_STT", "fallback"),
+        local_stt_model=os.getenv("VOICE_FLOW_LOCAL_MODEL", "large-v3-turbo"),
         cleanup_model=os.getenv(
             "VOICE_FLOW_CLEANUP_MODEL", "claude-haiku-4-5-20251001"
         ),

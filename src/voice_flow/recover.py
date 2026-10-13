@@ -25,7 +25,7 @@ from voice_flow.session_link import derive_captures, find_session_for
 from voice_flow.transcript_history import append_transcript
 from voice_flow.transcript_quality import is_suspect_transcription
 from voice_flow.transcript_weave import weave_screenshot_markers
-from voice_flow.transcription import Transcriber
+from voice_flow.local_transcription import FallbackTranscriber, build_transcriber
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def mark_recovered(path: Path) -> Path:
         return path
 
 
-def recover_file(path: Path, transcriber: Transcriber, cfg: Config) -> str:
+def recover_file(path: Path, transcriber: FallbackTranscriber, cfg: Config) -> str:
     """Eine WAV transkribieren, Screenshots einweben, persistieren, markieren.
 
     Returns das (mit Bild-Markern angereicherte) Transkript.
@@ -143,8 +143,7 @@ def nachholen(fortschritt=None) -> tuple[int, int]:
     if not ziele:
         return (0, 0)
     config = load_config()
-    transcriber = Transcriber(api_key=config.openai_api_key,
-                              model=config.whisper_model)
+    transcriber = build_transcriber(config)
     geschafft = fehler = 0
     for i, pfad in enumerate(ziele, start=1):
         try:
@@ -178,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     config = load_config()
-    transcriber = Transcriber(api_key=config.openai_api_key, model=config.whisper_model)
+    transcriber = build_transcriber(config)
 
     last_text = ""
     failures = 0
