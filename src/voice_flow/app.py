@@ -27,8 +27,8 @@ from voice_flow.sound import beep_error, beep_ready, beep_start, beep_stop
 from voice_flow.transcript_history import append_transcript
 from voice_flow.transcript_quality import is_suspect_transcription
 from voice_flow.transcript_weave import weave_screenshot_markers
+from voice_flow.local_transcription import build_transcriber
 from voice_flow.transcription import (
-    Transcriber,
     TranscriberAuthError,
     TranscriberQuotaError,
 )
@@ -71,10 +71,8 @@ class VoiceFlowApp:
             # im RAM und ist bei Deadlock/Absturz weg (Vorfall 16.08.2026).
             spool_dir=RECORDINGS_DIR,
         )
-        self.transcriber = Transcriber(
-            api_key=config.openai_api_key,
-            model=config.whisper_model,
-        )
+        # 13.10.2026: erst OpenAI, scheitert das, die Grafikkarte (local_transcription).
+        self.transcriber = build_transcriber(config)
         self.cleaner = Cleaner(
             api_key=config.anthropic_api_key if config.enable_cleanup else None,
             model=config.cleanup_model,
@@ -683,7 +681,9 @@ class VoiceFlowApp:
                 log.warning("WHISPER  leeres Ergebnis.")
                 return
 
-            log.info("WHISPER  [%.1fs] %s", t_whisper, _truncate(raw, 200))
+            lokal = self.transcriber.last_engine == "lokal"
+            log.info("WHISPER%s  [%.1fs] %s", " (lokal)" if lokal else "", t_whisper,
+                     _truncate(raw, 200))
 
             cleaned = raw
             if self.cleaner.available:
@@ -739,7 +739,7 @@ class VoiceFlowApp:
                 text=final_text,
                 duration_sec=duration,
                 word_count=word_count,
-                model=self.config.whisper_model,
+                model=self.transcriber.model,
                 pipeline_ms=int(total_s * 1000),
             )
 
@@ -796,7 +796,9 @@ class VoiceFlowApp:
                 self.overlay.notify(
                     ToastKind.TRANSCRIPT,
                     f"{word_label}",
-                    f"{total_s:.1f}s · eingefuegt{image_note}",
+                    f"{total_s:.1f}s · eingefuegt{image_note}"
+                    + ((" · lokal (OpenAI fiel aus)" if self.transcriber.last_fallback_reason
+                        else " · lokal") if lokal else ""),
                     actions=[("Kopieren", lambda t=final_text: _copy_to_clipboard(t))],
                     duration_ms=4500,
                 )
