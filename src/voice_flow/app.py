@@ -121,7 +121,9 @@ class VoiceFlowApp:
                     # sofort, wohin das naechste Diktat geht.
                     self.overlay.set_mode_click_handler(self.cycle_paste_mode)
                     self.overlay.set_annotate_click_handler(self.on_annotate_hotkey)
+                    self.overlay.set_music_click_handler(self.toggle_music)
                     self._refresh_mode_chip()
+                    self._refresh_music_button()
             except Exception as ex:
                 log.warning("Overlay-Init fehlgeschlagen: %s", ex)
                 self.overlay = None
@@ -145,6 +147,32 @@ class VoiceFlowApp:
     def _current_device(self) -> int | str | None:
         """Aktuell gewaehltes Mikro: UI-Wahl gewinnt, sonst .env-Override, sonst None."""
         return self.settings.audio_device or self.config.audio_device
+
+    # ---------- Musik waehrend des Diktats (15.11 Bastian) ----------
+    # Nur der Ton wird umgeschaltet, das Mikro bleibt IMMER das gewaehlte.
+    # 15.11 Bastian: "Diktat muss ueber mein Mikro gehen, uebers Poly" — ein
+    # automatischer Wechsel auf die Webcam war drin und ist wieder raus.
+
+    def toggle_music(self) -> bool:
+        """Klick auf den Musik-Knopf: Musik beim Diktat an/aus. Wirkt sofort."""
+        # Unter dem State-Lock: sonst kann ein F8-Stopp zwischen Pruefung und
+        # mute() fallen — dann bliebe der Ton nach dem Diktat dauerhaft stumm.
+        with self._state_lock:
+            on = not self.settings.music_during_recording
+            self.settings.set_music_during_recording(on)
+            if self.audio_mute and self.state == self.STATE_RECORDING:
+                if on:
+                    self.audio_mute.unmute()
+                else:
+                    self.audio_mute.mute()
+        log.info("MUSIK  %s", "an — Ton laeuft beim Diktat weiter" if on
+                 else "aus — Ton beim Diktat stumm")
+        self._refresh_music_button()
+        return on
+
+    def _refresh_music_button(self) -> None:
+        if self.overlay:
+            self.overlay.set_music_state(self.settings.music_during_recording)
 
     def _populate_mic_picker(self) -> None:
         """Fuellt das Dropdown im Control-Fenster mit allen vorhandenen Mikros."""
@@ -236,7 +264,8 @@ class VoiceFlowApp:
 
         # System-Audio muten BEVOR der Beep kommt (sonst hoert man den Beep nicht
         # selbst, aber Bastian hoert die Background-Musik durch sein Mikro-Recording)
-        if self.audio_mute:
+        # 15.11: Musik-Knopf an der Pille — an = Ton laeuft beim Diktat weiter.
+        if self.audio_mute and not self.settings.music_during_recording:
             self.audio_mute.mute()
         if self.config.enable_sound:
             beep_start()

@@ -74,6 +74,7 @@ def build_mode_chip_class():
             self._icon: QPixmap | None = None
             self._pill_rect: tuple | None = None
             self._last_click = 0.0
+            self._music_button = None   # MusicButtonWidget, von RecordingOverlay gesetzt
 
             self.setWindowFlags(
                 Qt.WindowType.FramelessWindowHint
@@ -116,6 +117,11 @@ def build_mode_chip_class():
             """Pille zeigt sich (rect) oder verschwindet (None)."""
             if pill_rect is None:
                 self.hide()
+                # Ohne Pille kein Platz: sonst holt ein Modus-Wechsel im Ruhe-
+                # zustand den Musik-Knopf ohne Chip auf den Bildschirm.
+                self._pill_rect = None
+                if self._music_button is not None:
+                    self._music_button.sig_place.emit(None)
                 return
             self._pill_rect = tuple(pill_rect)
             self._move_beside(self._pill_rect)
@@ -141,6 +147,10 @@ def build_mode_chip_class():
             x, y = geometry_beside(pill_rect, self.width(), CHIP_HEIGHT,
                                    screen_left=screen.x())
             self.move(x, y)
+            # Musik-Knopf klebt links am Chip — der Chip aendert mit dem Modus
+            # seine Breite, deshalb platziert ER den Knopf, nicht die Pille.
+            if self._music_button is not None:
+                self._music_button.sig_place.emit((x, y, self.width(), CHIP_HEIGHT))
 
         # ── Klick ────────────────────────────────────────────────────
         # Kein AppKit-Kunstgriff: Qt.Tool + WA_ShowWithoutActivating stellt den
@@ -278,3 +288,118 @@ def build_pen_button_class():
             p.end()
 
     return PenButtonWidget
+
+
+MUSIC_BUTTON_SIZE = 34
+MUSIC_BUTTON_GAP = 6
+
+
+def music_button_pos(chip_rect: tuple[int, int, int, int],
+                     size: int = MUSIC_BUTTON_SIZE,
+                     gap: int = MUSIC_BUTTON_GAP) -> tuple[int, int]:
+    """(x, y) des Musik-Knopfs: links neben dem Modus-Chip, vertikal mittig."""
+    cx, cy, _cw, ch = chip_rect
+    return (cx - gap - size, cy + (ch - size) // 2)
+
+
+def build_music_button_class():
+    """Runder Musik-Knopf LINKS am Modus-Chip.
+
+    15.11 Bastian: "Musiksymbol an-aus ... dass ich Mute auf den Kopf hoere oder
+    halt eben nicht". Gruen = Musik laeuft beim Diktat weiter, grau durchgestrichen
+    = Ton waehrend der Aufnahme stumm (Standard).
+    """
+    from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal, pyqtSlot
+    from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
+    from PyQt6.QtWidgets import QWidget
+
+    from voice_flow.theme import (ACCENT_OK, SURFACE_BASE, SURFACE_BORDER,
+                                  TEXT_DIM)
+
+    class MusicButtonWidget(QWidget):
+        sig_place = pyqtSignal(object)      # chip_rect oder None (= verstecken)
+        sig_set_on = pyqtSignal(bool)
+
+        def __init__(self, on_click=None):
+            super().__init__()
+            self._on_click = on_click
+            self._last_click = 0.0
+            self._on = False
+            self.setWindowFlags(
+                Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.WindowStaysOnTopHint
+                | Qt.WindowType.Tool
+            )
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.resize(MUSIC_BUTTON_SIZE, MUSIC_BUTTON_SIZE)
+            self.sig_place.connect(self._apply_place)
+            self.sig_set_on.connect(self._apply_on)
+            self._update_tooltip()
+            self.hide()
+
+        @pyqtSlot(bool)
+        def _apply_on(self, on: bool) -> None:
+            self._on = bool(on)
+            self._update_tooltip()
+            self.update()
+
+        def _update_tooltip(self) -> None:
+            self.setToolTip("Musik beim Diktat: AN" if self._on
+                            else "Musik beim Diktat: AUS (stumm)")
+
+        @pyqtSlot(object)
+        def _apply_place(self, chip_rect) -> None:
+            if chip_rect is None:
+                self.hide()
+                return
+            self.move(*music_button_pos(tuple(chip_rect)))
+            self.show()
+            nach_vorne(self)
+
+        def mousePressEvent(self, event) -> None:
+            if event.button() != Qt.MouseButton.LeftButton or self._on_click is None:
+                return
+            now = time.monotonic()
+            if now - self._last_click < CLICK_DEBOUNCE_SEC:
+                event.accept()
+                return
+            self._last_click = now
+            try:
+                self._on_click()
+            except Exception as ex:
+                log.warning("Musik-Knopf-Handler-Fehler: %s", ex)
+            event.accept()
+
+        def paintEvent(self, _event) -> None:
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            rect = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+            kreis = QPainterPath()
+            kreis.addEllipse(rect)
+            p.fillPath(kreis, QColor(SURFACE_BASE))
+            p.strokePath(kreis, QColor(ACCENT_OK if self._on else SURFACE_BORDER))
+
+            from voice_flow.icons import load as load_icon
+
+            farbe = ACCENT_OK if self._on else TEXT_DIM
+            pix = load_icon("music", farbe, 17)
+            if pix is not None:
+                p.drawPixmap(int(self.width() / 2 - 8.5), int(self.height() / 2 - 8.5), pix)
+            if not self._on:
+                # Durchgestrichen = stumm. Erst ein Schlitz in Hintergrundfarbe,
+                # dann der Strich — so trennt er sich sauber vom Notensymbol.
+                a, b = QPointF(9.5, 9.5), QPointF(self.width() - 9.5, self.height() - 9.5)
+                schlitz = QPen(QColor(SURFACE_BASE), 4.5)
+                schlitz.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(schlitz)
+                p.drawLine(a, b)
+                strich = QPen(QColor(TEXT_DIM), 2)
+                strich.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(strich)
+                p.drawLine(a, b)
+            p.end()
+
+    return MusicButtonWidget

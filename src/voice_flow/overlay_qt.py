@@ -592,6 +592,9 @@ class RecordingOverlay:
         self._chip = None  # ModeChipWidget (Claude Code vs. AI-Web)
         self._pen_button = None  # runder Stift-Knopf rechts an der Pille
         self._mode_chip_state = None  # (label, mode), falls vor dem Chip gesetzt
+        self._music_button = None  # runder Musik-Knopf links am Chip
+        self._music_state: Optional[bool] = None  # falls vor dem Knopf gesetzt
+        self._on_music_click_cb: Optional[Callable[[], None]] = None
         self._on_mode_click_cb: Optional[Callable[[], None]] = None
         self._on_annotate_click_cb: Optional[Callable[[], None]] = None
         self._on_quit_cb: Optional[Callable[[], None]] = None
@@ -667,6 +670,20 @@ class RecordingOverlay:
     def _fire_mode_click(self) -> None:
         if self._on_mode_click_cb:
             self._on_mode_click_cb()
+
+    def set_music_state(self, on: bool) -> None:
+        """Musik-Knopf auf an/aus stellen (thread-safe). Vor Knopf-Existenz: gemerkt."""
+        self._music_state = bool(on)
+        if self._music_button is not None:
+            self._music_button.sig_set_on.emit(self._music_state)
+
+    def set_music_click_handler(self, cb: Callable[[], None]) -> None:
+        """Was ein Klick auf den Musik-Knopf macht — vom App-Controller gesetzt."""
+        self._on_music_click_cb = cb
+
+    def _fire_music_click(self) -> None:
+        if self._on_music_click_cb:
+            self._on_music_click_cb()
 
     def set_annotate_click_handler(self, cb: Callable[[], None]) -> None:
         """Was der Stift am Chip macht — vom App-Controller gesetzt."""
@@ -811,6 +828,21 @@ class RecordingOverlay:
             except Exception as ex:
                 log.warning("Modus-Chip-Init fehlgeschlagen: %s", ex)
                 self._chip = None
+
+            # Musik-Knopf links am Chip (15.11): Ton beim Diktat an/aus.
+            # Eigener Block: scheitert er, bleiben Chip und Stift heil.
+            if self._chip is not None:
+                try:
+                    from voice_flow.mode_chip import build_music_button_class
+
+                    self._music_button = build_music_button_class()(
+                        on_click=self._fire_music_click)
+                    self._chip._music_button = self._music_button
+                    if self._music_state is not None:
+                        self._music_button.sig_set_on.emit(self._music_state)
+                except Exception as ex:
+                    log.warning("Musik-Knopf-Init fehlgeschlagen: %s", ex)
+                    self._music_button = None
 
             # Premium Toast-System im selben Qt-Thread (eine QApplication).
             try:
