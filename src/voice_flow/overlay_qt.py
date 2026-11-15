@@ -823,19 +823,26 @@ class RecordingOverlay:
                 self._pen_button = build_pen_button_class()(
                     on_click=self._fire_annotate_click)
                 self._widget._pen_button = self._pen_button
-                # Musik-Knopf links am Chip (15.11): Ton beim Diktat an/aus.
-                from voice_flow.mode_chip import build_music_button_class
-
-                self._music_button = build_music_button_class()(
-                    on_click=self._fire_music_click)
-                self._chip._music_button = self._music_button
-                if self._music_state is not None:
-                    self._music_button.sig_set_on.emit(self._music_state)
                 if self._mode_chip_state is not None:
                     self._chip.sig_set_mode.emit(self._mode_chip_state)
             except Exception as ex:
                 log.warning("Modus-Chip-Init fehlgeschlagen: %s", ex)
                 self._chip = None
+
+            # Musik-Knopf links am Chip (15.11): Ton beim Diktat an/aus.
+            # Eigener Block: scheitert er, bleiben Chip und Stift heil.
+            if self._chip is not None:
+                try:
+                    from voice_flow.mode_chip import build_music_button_class
+
+                    self._music_button = build_music_button_class()(
+                        on_click=self._fire_music_click)
+                    self._chip._music_button = self._music_button
+                    if self._music_state is not None:
+                        self._music_button.sig_set_on.emit(self._music_state)
+                except Exception as ex:
+                    log.warning("Musik-Knopf-Init fehlgeschlagen: %s", ex)
+                    self._music_button = None
 
             # Premium Toast-System im selben Qt-Thread (eine QApplication).
             try:

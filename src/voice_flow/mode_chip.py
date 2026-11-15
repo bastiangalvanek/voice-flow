@@ -117,6 +117,9 @@ def build_mode_chip_class():
             """Pille zeigt sich (rect) oder verschwindet (None)."""
             if pill_rect is None:
                 self.hide()
+                # Ohne Pille kein Platz: sonst holt ein Modus-Wechsel im Ruhe-
+                # zustand den Musik-Knopf ohne Chip auf den Bildschirm.
+                self._pill_rect = None
                 if self._music_button is not None:
                     self._music_button.sig_place.emit(None)
                 return
@@ -336,10 +339,6 @@ def build_music_button_class():
             self.sig_set_on.connect(self._apply_on)
             self._update_tooltip()
             self.hide()
-
-        @property
-        def is_on(self) -> bool:
-            return self._on
 
         @pyqtSlot(bool)
         def _apply_on(self, on: bool) -> None:

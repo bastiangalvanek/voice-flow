@@ -6,7 +6,7 @@ import threading
 import time
 import webbrowser
 
-from voice_flow.audio import AudioRecorder, list_input_devices, music_safe_device
+from voice_flow.audio import AudioRecorder, list_input_devices
 from voice_flow.audio_mute import SystemAudioMute
 from voice_flow.cleanup import Cleaner
 from voice_flow.config import Config
@@ -66,7 +66,7 @@ class VoiceFlowApp:
         self.recorder = AudioRecorder(
             sample_rate=config.sample_rate,
             channels=config.channels,
-            device=self._recording_device,
+            device=self._current_device,
             # Live-Mitschrift auf Platte: ohne sie lebt eine laufende Aufnahme nur
             # im RAM und ist bei Deadlock/Absturz weg (Vorfall 16.08.2026).
             spool_dir=RECORDINGS_DIR,
@@ -148,39 +148,26 @@ class VoiceFlowApp:
         """Aktuell gewaehltes Mikro: UI-Wahl gewinnt, sonst .env-Override, sonst None."""
         return self.settings.audio_device or self.config.audio_device
 
-    def _recording_device(self) -> int | str | None:
-        """Mikro fuer DIESE Aufnahme — bei "Musik an" nie das Headset-Mikro."""
-        dev = self._current_device()
-        if self.settings.music_during_recording:
-            return music_safe_device(dev, self.config.sample_rate)
-        return dev
-
     # ---------- Musik waehrend des Diktats (15.11 Bastian) ----------
+    # Nur der Ton wird umgeschaltet, das Mikro bleibt IMMER das gewaehlte.
+    # 15.11 Bastian: "Diktat muss ueber mein Mikro gehen, uebers Poly" — ein
+    # automatischer Wechsel auf die Webcam war drin und ist wieder raus.
 
     def toggle_music(self) -> bool:
         """Klick auf den Musik-Knopf: Musik beim Diktat an/aus. Wirkt sofort."""
-        on = not self.settings.music_during_recording
-        self.settings.set_music_during_recording(on)
-        log.info("MUSIK  %s", "an — Ton laeuft beim Diktat weiter" if on else "aus — Ton beim Diktat stumm")
-        if self.audio_mute and self.state == self.STATE_RECORDING:
-            if on:
-                self.audio_mute.unmute()
-            else:
-                self.audio_mute.mute()
+        # Unter dem State-Lock: sonst kann ein F8-Stopp zwischen Pruefung und
+        # mute() fallen — dann bliebe der Ton nach dem Diktat dauerhaft stumm.
+        with self._state_lock:
+            on = not self.settings.music_during_recording
+            self.settings.set_music_during_recording(on)
+            if self.audio_mute and self.state == self.STATE_RECORDING:
+                if on:
+                    self.audio_mute.unmute()
+                else:
+                    self.audio_mute.mute()
+        log.info("MUSIK  %s", "an — Ton laeuft beim Diktat weiter" if on
+                 else "aus — Ton beim Diktat stumm")
         self._refresh_music_button()
-        # 15.11 Test Bastian: Musik mitten im Diktat angeschaltet, aber die laufende
-        # Aufnahme haelt das Headset-Mikro offen — Kopfhoerer bleiben im Telefon-
-        # Modus, Musik stumm. Das Mikro wechselt erst beim naechsten F8.
-        if on and self.state == self.STATE_RECORDING and self.overlay:
-            if music_safe_device(self._current_device(), self.config.sample_rate) \
-                    != self._current_device():
-                from voice_flow.notifications import ToastKind
-
-                self.overlay.notify(
-                    ToastKind.INFO, "Musik an — ab dem naechsten F8",
-                    "Dieses Diktat haelt noch das Headset-Mikro. Ab dem naechsten "
-                    "laeuft es ueber die Webcam, dann kommt die Musik in Stereo.",
-                    duration_ms=6000)
         return on
 
     def _refresh_music_button(self) -> None:
