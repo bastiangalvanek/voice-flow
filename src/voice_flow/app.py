@@ -6,7 +6,7 @@ import threading
 import time
 import webbrowser
 
-from voice_flow.audio import AudioRecorder, list_input_devices
+from voice_flow.audio import AudioRecorder, list_input_devices, music_safe_device
 from voice_flow.audio_mute import SystemAudioMute
 from voice_flow.cleanup import Cleaner
 from voice_flow.config import Config
@@ -66,7 +66,7 @@ class VoiceFlowApp:
         self.recorder = AudioRecorder(
             sample_rate=config.sample_rate,
             channels=config.channels,
-            device=self._current_device,
+            device=self._recording_device,
             # Live-Mitschrift auf Platte: ohne sie lebt eine laufende Aufnahme nur
             # im RAM und ist bei Deadlock/Absturz weg (Vorfall 16.08.2026).
             spool_dir=RECORDINGS_DIR,
@@ -121,7 +121,9 @@ class VoiceFlowApp:
                     # sofort, wohin das naechste Diktat geht.
                     self.overlay.set_mode_click_handler(self.cycle_paste_mode)
                     self.overlay.set_annotate_click_handler(self.on_annotate_hotkey)
+                    self.overlay.set_music_click_handler(self.toggle_music)
                     self._refresh_mode_chip()
+                    self._refresh_music_button()
             except Exception as ex:
                 log.warning("Overlay-Init fehlgeschlagen: %s", ex)
                 self.overlay = None
@@ -145,6 +147,45 @@ class VoiceFlowApp:
     def _current_device(self) -> int | str | None:
         """Aktuell gewaehltes Mikro: UI-Wahl gewinnt, sonst .env-Override, sonst None."""
         return self.settings.audio_device or self.config.audio_device
+
+    def _recording_device(self) -> int | str | None:
+        """Mikro fuer DIESE Aufnahme — bei "Musik an" nie das Headset-Mikro."""
+        dev = self._current_device()
+        if self.settings.music_during_recording:
+            return music_safe_device(dev, self.config.sample_rate)
+        return dev
+
+    # ---------- Musik waehrend des Diktats (15.11 Bastian) ----------
+
+    def toggle_music(self) -> bool:
+        """Klick auf den Musik-Knopf: Musik beim Diktat an/aus. Wirkt sofort."""
+        on = not self.settings.music_during_recording
+        self.settings.set_music_during_recording(on)
+        log.info("MUSIK  %s", "an — Ton laeuft beim Diktat weiter" if on else "aus — Ton beim Diktat stumm")
+        if self.audio_mute and self.state == self.STATE_RECORDING:
+            if on:
+                self.audio_mute.unmute()
+            else:
+                self.audio_mute.mute()
+        self._refresh_music_button()
+        # 15.11 Test Bastian: Musik mitten im Diktat angeschaltet, aber die laufende
+        # Aufnahme haelt das Headset-Mikro offen — Kopfhoerer bleiben im Telefon-
+        # Modus, Musik stumm. Das Mikro wechselt erst beim naechsten F8.
+        if on and self.state == self.STATE_RECORDING and self.overlay:
+            if music_safe_device(self._current_device(), self.config.sample_rate) \
+                    != self._current_device():
+                from voice_flow.notifications import ToastKind
+
+                self.overlay.notify(
+                    ToastKind.INFO, "Musik an — ab dem naechsten F8",
+                    "Dieses Diktat haelt noch das Headset-Mikro. Ab dem naechsten "
+                    "laeuft es ueber die Webcam, dann kommt die Musik in Stereo.",
+                    duration_ms=6000)
+        return on
+
+    def _refresh_music_button(self) -> None:
+        if self.overlay:
+            self.overlay.set_music_state(self.settings.music_during_recording)
 
     def _populate_mic_picker(self) -> None:
         """Fuellt das Dropdown im Control-Fenster mit allen vorhandenen Mikros."""
@@ -236,7 +277,8 @@ class VoiceFlowApp:
 
         # System-Audio muten BEVOR der Beep kommt (sonst hoert man den Beep nicht
         # selbst, aber Bastian hoert die Background-Musik durch sein Mikro-Recording)
-        if self.audio_mute:
+        # 15.11: Musik-Knopf an der Pille — an = Ton laeuft beim Diktat weiter.
+        if self.audio_mute and not self.settings.music_during_recording:
             self.audio_mute.mute()
         if self.config.enable_sound:
             beep_start()

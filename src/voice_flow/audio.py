@@ -59,6 +59,42 @@ def list_input_devices() -> list[tuple[int, str]]:
     return out
 
 
+_BLUETOOTH_MARKERS = ("hands-free", "bthhfenum")
+# Headset-Namen: auch ueber den USB-Dongle (z.B. "Kopfhoerer (2- Poly VFOCUS2)")
+# schaltet das Headset beim Oeffnen des Mikros in den Telefon-Modus.
+_HEADSET_PREFIXES = ("kopfh", "headset", "headphone")
+# Sammel-/Virtuelle Eingaenge, die kein echtes Mikro sind.
+_PSEUDO_INPUTS = ("soundmapper", "primärer", "primaerer", "primary", "line", "analog")
+
+
+def is_headset_mic(name: str) -> bool:
+    """True, wenn das Mikro im Headset sitzt (Bluetooth oder Headset-Dongle).
+
+    Oeffnet eine App so ein Mikro, schaltet Windows das Headset in den
+    Freisprech-Modus: Musik auf den Kopfhoerern wird mono und dumpf.
+    """
+    n = _norm(name)
+    return any(m in n for m in _BLUETOOTH_MARKERS) or n.startswith(_HEADSET_PREFIXES)
+
+
+def wired_alternative(devices: list[tuple[int, str]]) -> str | None:
+    """Bestes Mikro, das NICHT im Headset sitzt — Webcam zuerst, dann andere.
+
+    15.11 Bastian: "auf meinen Kopfhoerern ganz normal in richtiger Qualitaet".
+    Geht nur, wenn das Diktat ueber ein anderes Mikro laeuft. Webcam zuerst,
+    weil die NexiGo nativ 16 kHz liefert (gemessen 07.07.).
+    """
+    kandidaten = [
+        name for _, name in devices
+        if not is_headset_mic(name)
+        and not any(p in _norm(name) for p in _PSEUDO_INPUTS)
+    ]
+    for name in kandidaten:
+        if "webcam" in _norm(name):
+            return name
+    return kandidaten[0] if kandidaten else None
+
+
 def _norm(s: str) -> str:
     """Whitespace kollabieren + lowercase — robust gegen \\r\\n in WDM-KS-Namen."""
     return " ".join(str(s).split()).lower()
@@ -124,6 +160,29 @@ def resolve_input_device(configured: int | str | None, sample_rate: int) -> int:
         "das erste vorhandene Mikro [%s].", picked,
     )
     return picked
+
+
+def music_safe_device(configured: int | str | None, sample_rate: int) -> int | str | None:
+    """Mikro fuer "Musik an": sitzt das gewaehlte im Headset, ein anderes nehmen.
+
+    Sonst schaltet Windows die Kopfhoerer beim Diktat in den Freisprech-Modus und
+    die Musik klingt wie am Telefon. Ohne Alternative bleibt es beim gewaehlten.
+    """
+    try:
+        name = str(sd.query_devices(resolve_input_device(configured, sample_rate))["name"])
+    except Exception as ex:
+        log.debug("Mikro fuer Musik-Modus nicht pruefbar: %s", ex)
+        return configured
+    if not is_headset_mic(name):
+        return configured
+    alt = wired_alternative(list_input_devices())
+    if alt is None:
+        log.warning("MUSIK  Headset-Mikro %s und kein anderes Mikro da — Musik "
+                    "klingt waehrend des Diktats wie am Telefon.", clean_device_name(name))
+        return configured
+    log.info("MUSIK  Diktat ueber %s statt %s — Kopfhoerer bleiben in Stereo.",
+             clean_device_name(alt), clean_device_name(name))
+    return alt
 
 
 class AudioRecorder:

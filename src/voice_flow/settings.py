@@ -59,6 +59,18 @@ class Settings:
 
         return normalize_mode(self._data.get("paste_mode"))
 
+    @property
+    def music_during_recording(self) -> bool:
+        """15.11 Bastian: Musik waehrend des Diktats weiterhoeren (Knopf an der Pille).
+
+        False (Default) = altes Verhalten: System-Ton waehrend der Aufnahme stumm.
+        """
+        return self._data.get("music_during_recording") is True
+
+    def set_music_during_recording(self, on: bool) -> None:
+        self._data["music_during_recording"] = bool(on)
+        self._save()
+
     def set_paste_mode(self, mode: str) -> None:
         self._data["paste_mode"] = mode
         self._save()
